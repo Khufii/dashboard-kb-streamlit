@@ -18,12 +18,11 @@ except Exception:
 st.set_page_config(
     page_title="Dashboard KB Terintegrasi",
     layout="wide",
-    initial_sidebar_state="expanded"  # <-- pastikan sidebar muncul
+    initial_sidebar_state="expanded"
 )
 
 # =========================
-# CSS: LIGHT + BLUE THEME
-# (JANGAN hide header total supaya tombol sidebar tetap ada)
+# CSS: LIGHT + BLUE + FIX HEADER OVERLAP
 # =========================
 st.markdown(
     """
@@ -39,11 +38,18 @@ st.markdown(
   --blue: #2563eb;
 }
 
-/* App background */
+/* Background */
 [data-testid="stAppViewContainer"]{
   background: radial-gradient(1200px 600px at 20% 10%, rgba(37,99,235,0.20), transparent 60%),
               radial-gradient(900px 500px at 80% 20%, rgba(96,165,250,0.18), transparent 55%),
               linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
+}
+
+/* IMPORTANT: give space from top (Streamlit Cloud header overlaps) */
+.block-container{
+  padding-top: 64px !important;  /* <-- FIX UTAMA */
+  padding-bottom: 40px !important;
+  max-width: 1220px;
 }
 
 /* Force dark text in MAIN */
@@ -55,16 +61,12 @@ section.main, section.main *{
 [data-testid="stSidebar"]{
   background: var(--card);
   border-right: 1px solid var(--border);
-}
-
-/* Make sidebar narrow (icon bar) */
-[data-testid="stSidebar"]{
   min-width: 90px !important;
   max-width: 90px !important;
   width: 90px !important;
 }
 
-/* Radio group inside sidebar: icon buttons */
+/* Icon radio */
 [data-testid="stSidebar"] div[role="radiogroup"]{ gap: 10px; }
 [data-testid="stSidebar"] div[role="radiogroup"] label{
   justify-content: center !important;
@@ -131,7 +133,7 @@ section.main span[data-baseweb="tag"]{
 }
 section.main span[data-baseweb="tag"] *{ color: var(--blue) !important; }
 
-/* Dataframe (force light) */
+/* Dataframe light */
 [data-testid="stDataFrame"]{
   border-radius: 14px;
   overflow: hidden;
@@ -140,16 +142,15 @@ section.main span[data-baseweb="tag"] *{ color: var(--blue) !important; }
 }
 [data-testid="stDataFrame"] *{ color: var(--text) !important; }
 [data-testid="stDataFrame"] [role="grid"]{ background: var(--card) !important; }
-
-/* Layout width */
-.block-container{
-  padding-top: 12px;
-  max-width: 1220px;
-}
 </style>
 """,
     unsafe_allow_html=True
 )
+
+# =========================
+# TOP SPACER (extra safety)
+# =========================
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
 # =========================
 # CONSTANTS
@@ -158,7 +159,6 @@ URUTAN_BULAN = [
     "JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI",
     "JULI","AGUSTUS","SEPTEMBER","OKTOBER","NOVEMBER","DESEMBER"
 ]
-
 KOLUM_NUMERIK_DB1 = [
     "SUNTIKAN 1 BULANAN",
     "SUNTIKAN 3 BULANAN KOMBINASI",
@@ -170,7 +170,6 @@ KOLUM_NUMERIK_DB1 = [
     "IMPLAN 2 BATANG",
     "IUD"
 ]
-
 VAR_STOK = ["SUNTIK", "PIL", "IMPLAN", "KONDOM", "IUD"]
 VAR_ALL_STOK = ["TOTAL_STOK"] + VAR_STOK
 
@@ -178,7 +177,7 @@ def norm_str(x):
     return str(x).strip().upper()
 
 # =========================
-# LOAD & PREP DB1
+# LOAD DB1
 # =========================
 @st.cache_data(ttl=300)
 def load_db1_time_series(path_or_file) -> pd.DataFrame:
@@ -211,15 +210,14 @@ def load_db1_time_series(path_or_file) -> pd.DataFrame:
     )
 
     if "KABUPATEN" not in df_all.columns:
-        raise ValueError("DB1: kolom 'KABUPATEN' tidak ditemukan (dibutuhkan untuk keterkaitan).")
+        raise ValueError("DB1: kolom 'KABUPATEN' tidak ditemukan.")
 
     df_all["KABUPATEN"] = df_all["KABUPATEN"].astype(str).str.strip().str.upper()
     return df_all
 
 def db1_ts_per_kab(df_all: pd.DataFrame, kabupaten: str) -> pd.DataFrame:
     df_k = df_all[df_all["KABUPATEN"] == kabupaten][["BULAN"] + VAR_STOK].copy()
-    out = df_k.groupby("BULAN", as_index=False).sum().sort_values("BULAN")
-    return out
+    return df_k.groupby("BULAN", as_index=False).sum().sort_values("BULAN")
 
 def db1_agg_per_kab(df_all: pd.DataFrame) -> pd.DataFrame:
     out = df_all[["KABUPATEN"] + VAR_STOK].groupby("KABUPATEN", as_index=False).sum()
@@ -233,26 +231,17 @@ def adf_status(series: pd.Series):
     if len(s) < 6:
         return np.nan, "data terlalu sedikit"
     p = adfuller(s)[1]
-    status = "stasioner" if p < 0.05 else "tidak stasioner (perlu differencing)"
-    return p, status
+    return p, ("stasioner" if p < 0.05 else "tidak stasioner (perlu differencing)")
 
 # =========================
-# LOAD & PREP DB2
+# LOAD DB2
 # =========================
 @st.cache_data(ttl=300)
 def load_db2_people(path_or_file) -> pd.DataFrame:
     df = pd.read_excel(path_or_file)
-
     df.columns = [
-        "kode",
-        "kabupaten",
-        "tempat_kb",
-        "dok_kandungan",
-        "dok_urologi",
-        "dok_umum",
-        "bidan",
-        "perawat",
-        "administrasi"
+        "kode","kabupaten","tempat_kb","dok_kandungan","dok_urologi",
+        "dok_umum","bidan","perawat","administrasi"
     ]
 
     df = df[df["kabupaten"].notna()]
@@ -265,24 +254,16 @@ def load_db2_people(path_or_file) -> pd.DataFrame:
     df[num_cols] = df[num_cols].apply(lambda x: pd.to_numeric(x, errors="coerce"))
 
     df["tenaga_kesehatan_total"] = (
-        df["dok_kandungan"].fillna(0)
-        + df["dok_urologi"].fillna(0)
-        + df["dok_umum"].fillna(0)
-        + df["bidan"].fillna(0)
-        + df["perawat"].fillna(0)
+        df["dok_kandungan"].fillna(0) + df["dok_urologi"].fillna(0)
+        + df["dok_umum"].fillna(0) + df["bidan"].fillna(0) + df["perawat"].fillna(0)
     )
 
     df["tempat_kb_safe"] = df["tempat_kb"].replace({0: np.nan})
     df["sdm_per_tempat"] = (df["tenaga_kesehatan_total"] / df["tempat_kb_safe"]).round(3)
     df["admin_per_tempat"] = (df["administrasi"] / df["tempat_kb_safe"]).round(3)
 
-    int_cols = [
-        "tempat_kb","dok_kandungan","dok_urologi",
-        "dok_umum","bidan","perawat","administrasi",
-        "tenaga_kesehatan_total"
-    ]
+    int_cols = ["tempat_kb","dok_kandungan","dok_urologi","dok_umum","bidan","perawat","administrasi","tenaga_kesehatan_total"]
     df[int_cols] = df[int_cols].round(0).astype("Int64")
-
     df["KABUPATEN"] = df["kabupaten"].str.upper()
     return df
 
@@ -295,7 +276,7 @@ def spearman_strength(rho: float) -> str:
     return "sangat kuat"
 
 # =========================
-# LOAD DATA FROM REPO
+# LOAD FROM REPO
 # =========================
 DB1_PATH = os.path.join("data", "DATA KETERSEDIAAN ALAT DAN OBAT KONTRASEPSI.xlsx")
 DB2_PATH = os.path.join("data", "Jumlah tempat pelayanan kb yang memiliki tenaga kesehatan dan administrasi.xlsx")
@@ -307,72 +288,39 @@ if not os.path.exists(DB2_PATH):
     st.error(f"File DB2 tidak ditemukan: {DB2_PATH}")
     st.stop()
 
-try:
-    df1_all = load_db1_time_series(DB1_PATH)
-    df2 = load_db2_people(DB2_PATH)
-except Exception as e:
-    st.error(f"Gagal memproses data: {e}")
-    st.stop()
-
+df1_all = load_db1_time_series(DB1_PATH)
+df2 = load_db2_people(DB2_PATH)
 df1_kab = db1_agg_per_kab(df1_all)
 df_int = df2.merge(df1_kab, on="KABUPATEN", how="inner")
 
 kab_list = sorted(df_int["KABUPATEN"].unique().tolist())
-if len(kab_list) == 0:
-    st.error("Tidak ada kabupaten yang berhasil terhubung (cek penulisan kolom KABUPATEN di kedua file).")
+if not kab_list:
+    st.error("Tidak ada kabupaten yang terhubung.")
     st.stop()
 
 # =========================
-# ICON NAV (LEFT)
+# NAV ICON
 # =========================
 MENU_KEYS = ["SUMMARY", "TS", "PEOPLE", "LINK", "KRUSKAL", "DATASET"]
-MENU_ICON = {
-    "SUMMARY": "🏠",
-    "TS": "📈",
-    "PEOPLE": "👥",
-    "LINK": "🔗",
-    "KRUSKAL": "🧪",
-    "DATASET": "🗂️",
-}
-MENU_NAME = {
-    "SUMMARY": "Summary",
-    "TS": "Deret Waktu",
-    "PEOPLE": "People Analytics",
-    "LINK": "Keterkaitan",
-    "KRUSKAL": "Kruskal–Wallis",
-    "DATASET": "Dataset",
-}
+MENU_ICON = {"SUMMARY":"🏠","TS":"📈","PEOPLE":"👥","LINK":"🔗","KRUSKAL":"🧪","DATASET":"🗂️"}
+MENU_NAME = {"SUMMARY":"Summary","TS":"Deret Waktu","PEOPLE":"People Analytics","LINK":"Keterkaitan","KRUSKAL":"Kruskal–Wallis","DATASET":"Dataset"}
 
 with st.sidebar:
-    menu_key = st.radio(
-        "Menu",
-        MENU_KEYS,
-        index=0,
-        format_func=lambda k: MENU_ICON[k],
-        label_visibility="collapsed"
-    )
+    menu_key = st.radio("Menu", MENU_KEYS, format_func=lambda k: MENU_ICON[k], label_visibility="collapsed")
 
 # =========================
-# TOPBAR + FILTER (KANAN ATAS)
+# TOPBAR + FILTER
 # =========================
 top_l, top_r = st.columns([2.7, 1.3], vertical_alignment="center")
 with top_l:
-    st.markdown(
-        f"""
-        <div class="topbar">
-          <b>Dashboard KB Terintegrasi</b>
-          <span class="crumb">{MENU_NAME[menu_key]}</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown(f"<div class='topbar'><b>Dashboard KB Terintegrasi</b><span class='crumb'>{MENU_NAME[menu_key]}</span></div>", unsafe_allow_html=True)
 with top_r:
     kab = st.selectbox("Kabupaten", kab_list, index=0, label_visibility="collapsed")
 
 st.write("")
 
 # =========================
-# KPI ROW
+# KPIs
 # =========================
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Kabupaten terhubung", f"{df_int['KABUPATEN'].nunique():,}")
@@ -391,32 +339,26 @@ if menu_key == "SUMMARY":
         st.markdown("<div class='card'><b>Top 10 — Tenaga Kesehatan Total</b></div>", unsafe_allow_html=True)
         top10_sdm = df_int.sort_values("tenaga_kesehatan_total", ascending=False).head(10)
         st.dataframe(top10_sdm[["KABUPATEN","tempat_kb","tenaga_kesehatan_total","administrasi"]], use_container_width=True)
-
         st.markdown("<div class='card'><b>Grafik Top 10 — Tenaga Kesehatan</b></div>", unsafe_allow_html=True)
-        chart_df = top10_sdm.set_index("KABUPATEN")[["tenaga_kesehatan_total"]]
-        st.bar_chart(chart_df, use_container_width=True)
+        st.bar_chart(top10_sdm.set_index("KABUPATEN")[["tenaga_kesehatan_total"]], use_container_width=True)
 
     with right:
         st.markdown("<div class='card'><b>Top 10 — Total Stok Setahun</b></div>", unsafe_allow_html=True)
         top10_stok = df_int.sort_values("TOTAL_STOK", ascending=False).head(10)
         st.dataframe(top10_stok[["KABUPATEN","TOTAL_STOK","SUNTIK","PIL","IMPLAN","KONDOM","IUD"]], use_container_width=True)
-
         st.markdown("<div class='card'><b>Grafik Top 10 — Total Stok</b></div>", unsafe_allow_html=True)
-        chart_df2 = top10_stok.set_index("KABUPATEN")[["TOTAL_STOK"]]
-        st.bar_chart(chart_df2, use_container_width=True)
+        st.bar_chart(top10_stok.set_index("KABUPATEN")[["TOTAL_STOK"]], use_container_width=True)
 
 elif menu_key == "TS":
     st.markdown(f"<div class='card'><b>Deret Waktu Persediaan</b><br/><span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>", unsafe_allow_html=True)
-
     df_ts = db1_ts_per_kab(df1_all, kab)
-
     vsel = st.multiselect("Variabel stok", VAR_STOK, default=VAR_STOK)
+
     if vsel:
         st.line_chart(df_ts.set_index("BULAN")[vsel], use_container_width=True)
     else:
         st.info("Pilih minimal 1 variabel.")
 
-    # Moving average tambahan
     st.markdown("<div class='card'><b>Moving Average (3 bulan)</b></div>", unsafe_allow_html=True)
     ma_df = df_ts.copy()
     for v in VAR_STOK:
@@ -424,36 +366,25 @@ elif menu_key == "TS":
     show_ma = [f"MA3_{v}" for v in vsel] if vsel else [f"MA3_{v}" for v in VAR_STOK]
     st.line_chart(ma_df.set_index("BULAN")[show_ma], use_container_width=True)
 
-    # ADF
     st.markdown("<div class='card'><b>Uji stasioneritas (ADF)</b></div>", unsafe_allow_html=True)
-    rows = []
-    for v in VAR_STOK:
-        p, status = adf_status(df_ts[v])
-        rows.append({"Variabel": v, "p-value": p, "Kesimpulan": status})
+    rows = [{"Variabel": v, "p-value": adf_status(df_ts[v])[0], "Kesimpulan": adf_status(df_ts[v])[1]} for v in VAR_STOK]
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 elif menu_key == "PEOPLE":
     st.markdown(f"<div class='card'><b>People Analytics</b><br/><span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>", unsafe_allow_html=True)
-
     row = df_int[df_int["KABUPATEN"] == kab].iloc[0]
+
     a1, a2, a3, a4 = st.columns(4)
     a1.metric("Tempat KB", f"{int(row['tempat_kb']) if pd.notna(row['tempat_kb']) else 0:,}")
     a2.metric("Tenaga Kesehatan Total", f"{int(row['tenaga_kesehatan_total']) if pd.notna(row['tenaga_kesehatan_total']) else 0:,}")
     a3.metric("Administrasi", f"{int(row['administrasi']) if pd.notna(row['administrasi']) else 0:,}")
     a4.metric("Total Stok Setahun", f"{float(row['TOTAL_STOK']):,.0f}")
 
-    st.markdown("<div class='card'><b>Komposisi stok setahun</b></div>", unsafe_allow_html=True)
     comp = pd.DataFrame({"Metode": VAR_STOK, "Total Setahun": [float(row[v]) for v in VAR_STOK]})
+    st.markdown("<div class='card'><b>Komposisi stok setahun</b></div>", unsafe_allow_html=True)
     st.dataframe(comp, use_container_width=True)
-
-    st.markdown("<div class='card'><b>Grafik komposisi stok (Bar)</b></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Grafik komposisi stok</b></div>", unsafe_allow_html=True)
     st.bar_chart(comp.set_index("Metode"), use_container_width=True)
-
-    st.markdown("<div class='card'><b>Deskriptif variabel kunci</b></div>", unsafe_allow_html=True)
-    st.dataframe(
-        df_int[["tempat_kb","tenaga_kesehatan_total","administrasi","sdm_per_tempat","admin_per_tempat","TOTAL_STOK"]].describe(),
-        use_container_width=True
-    )
 
 elif menu_key == "LINK":
     st.markdown("<div class='card'><b>Analisis Keterkaitan</b><br/><span style='color:rgba(15,23,42,0.62)'>Spearman + Scatter</span></div>", unsafe_allow_html=True)
@@ -461,51 +392,26 @@ elif menu_key == "LINK":
     x_opts = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
     y_opts = VAR_ALL_STOK
 
-    cx1, cx2 = st.columns(2)
-    with cx1:
-        x_var = st.selectbox("Variabel People (X)", x_opts, index=1)
-    with cx2:
-        y_var = st.selectbox("Variabel Stok (Y)", y_opts, index=0)
+    c1, c2 = st.columns(2)
+    with c1: x_var = st.selectbox("Variabel People (X)", x_opts, index=1)
+    with c2: y_var = st.selectbox("Variabel Stok (Y)", y_opts, index=0)
 
     d = df_int[[x_var, y_var, "KABUPATEN"]].dropna()
-    if len(d) < 5:
-        st.warning("Data valid terlalu sedikit untuk analisis.")
-    else:
+    if len(d) >= 5:
         rho, p = spearmanr(d[x_var], d[y_var], nan_policy="omit")
-        strength = spearman_strength(rho)
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Spearman rho", f"{rho:.3f}")
-        m2.metric("p-value", f"{p:.4f}")
-        m3.metric("Kekuatan", strength)
-
-        # Scatter
-        st.markdown("<div class='card'><b>Scatter</b></div>", unsafe_allow_html=True)
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Spearman rho", f"{rho:.3f}")
+        s2.metric("p-value", f"{p:.4f}")
+        s3.metric("Kekuatan", spearman_strength(rho))
         st.scatter_chart(d.set_index("KABUPATEN")[[x_var, y_var]], use_container_width=True)
-
-    # Heatmap-like table (Spearman matrix) sederhana
-    st.markdown("<div class='card'><b>Matriks korelasi Spearman (People vs Stok)</b></div>", unsafe_allow_html=True)
-    people_vars = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
-    stok_vars = ["TOTAL_STOK"] + VAR_STOK
-    corr_rows = []
-    for px in people_vars:
-        for sy in stok_vars:
-            dd = df_int[[px, sy]].dropna()
-            if len(dd) >= 5:
-                r, pv = spearmanr(dd[px], dd[sy], nan_policy="omit")
-            else:
-                r, pv = np.nan, np.nan
-            corr_rows.append({"People": px, "Stok": sy, "rho": r, "p_value": pv})
-    corr_df = pd.DataFrame(corr_rows)
-    st.dataframe(corr_df, use_container_width=True)
+    else:
+        st.warning("Data terlalu sedikit untuk korelasi.")
 
 elif menu_key == "KRUSKAL":
-    st.markdown("<div class='card'><b>Uji Kruskal–Wallis</b><br/><span style='color:rgba(15,23,42,0.62)'>Perbedaan stok antar grup Administrasi</span></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Uji Kruskal–Wallis</b><br/><span style='color:rgba(15,23,42,0.62)'>Stok antar grup Administrasi</span></div>", unsafe_allow_html=True)
 
     y_var = st.selectbox("Variabel stok untuk diuji", VAR_ALL_STOK, index=0)
 
-    # Buat grup berdasarkan jumlah administrasi
-    # 0 | 1-2 | 3-5 | >5  (boleh kamu ubah)
     d = df_int[[y_var, "administrasi"]].dropna()
     d["administrasi"] = d["administrasi"].astype(float)
     d[y_var] = d[y_var].astype(float)
@@ -518,46 +424,41 @@ elif menu_key == "KRUSKAL":
 
     d["admin_group"] = d["administrasi"].apply(admin_group)
 
-    groups = []
-    labels = []
-    for g in ["0", "1-2", "3-5", ">5"]:
+    groups, labels = [], []
+    for g in ["0","1-2","3-5",">5"]:
         vals = d[d["admin_group"] == g][y_var].dropna().values
         if len(vals) > 0:
             groups.append(vals)
             labels.append(g)
 
     if len(groups) < 2:
-        st.warning("Grup tidak cukup untuk Kruskal (minimal 2 grup dengan data).")
+        st.warning("Grup tidak cukup untuk Kruskal (minimal 2 grup).")
     else:
-        stat, p_kw = kruskal(*groups)
-        c1, c2 = st.columns(2)
-        c1.metric("Kruskal H", f"{stat:.3f}")
-        c2.metric("p-value", f"{p_kw:.4f}")
+        H, p_kw = kruskal(*groups)
+        kk1, kk2 = st.columns(2)
+        kk1.metric("Kruskal H", f"{H:.3f}")
+        kk2.metric("p-value", f"{p_kw:.4f}")
 
         if p_kw < 0.05:
             st.success("Ada perbedaan signifikan antar grup (α=5%).")
         else:
             st.info("Tidak ada perbedaan signifikan antar grup (α=5%).")
 
-        st.markdown("<div class='card'><b>Ringkasan per grup</b></div>", unsafe_allow_html=True)
         summary = (
             d.groupby("admin_group")[y_var]
-            .agg(["count", "median", "mean"])
+            .agg(["count","median","mean"])
             .reindex(labels)
             .reset_index()
-            .rename(columns={"admin_group": "Grup Admin"})
+            .rename(columns={"admin_group":"Grup Admin"})
         )
         st.dataframe(summary, use_container_width=True)
 
-        # Box plot sederhana via st.bar_chart median per grup
-        st.markdown("<div class='card'><b>Grafik Median per Grup (aproksimasi boxplot)</b></div>", unsafe_allow_html=True)
         med = d.groupby("admin_group")[y_var].median().reindex(labels)
         st.bar_chart(med, use_container_width=True)
 
 elif menu_key == "DATASET":
-    st.markdown("<div class='card'><b>Dataset Terintegrasi (hasil join)</b></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Dataset Terintegrasi</b></div>", unsafe_allow_html=True)
     st.dataframe(df_int, use_container_width=True, height=520)
-
     st.download_button(
         "⬇️ Download dataset terintegrasi (CSV)",
         data=df_int.to_csv(index=False).encode("utf-8"),
