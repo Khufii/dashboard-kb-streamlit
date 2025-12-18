@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -39,12 +40,12 @@ def norm_str(x):
 # LOAD & PREP DB1 (Time series)
 # =========================
 @st.cache_data(ttl=300)
-def load_db1_time_series(uploaded_file) -> pd.DataFrame:
-    xls = pd.ExcelFile(uploaded_file)
+def load_db1_time_series(path_or_file) -> pd.DataFrame:
+    xls = pd.ExcelFile(path_or_file)
     all_data = []
 
     for sheet in xls.sheet_names:
-        df = pd.read_excel(uploaded_file, sheet_name=sheet)
+        df = pd.read_excel(path_or_file, sheet_name=sheet)
         df["BULAN"] = norm_str(sheet)
         all_data.append(df)
 
@@ -56,7 +57,9 @@ def load_db1_time_series(uploaded_file) -> pd.DataFrame:
         raise ValueError(f"DB1: kolom numerik tidak ditemukan: {miss}")
 
     # numeric conversion
-    df_all[KOLUM_NUMERIK_DB1] = df_all[KOLUM_NUMERIK_DB1].apply(pd.to_numeric, errors="coerce").fillna(0)
+    df_all[KOLUM_NUMERIK_DB1] = df_all[KOLUM_NUMERIK_DB1].apply(
+        pd.to_numeric, errors="coerce"
+    ).fillna(0)
 
     # derived
     df_all["SUNTIK"] = (
@@ -68,7 +71,11 @@ def load_db1_time_series(uploaded_file) -> pd.DataFrame:
     df_all["IMPLAN"] = df_all["IMPLAN 1 BATANG"] + df_all["IMPLAN 2 BATANG"]
 
     # month ordering
-    df_all["BULAN"] = pd.Categorical(df_all["BULAN"].apply(norm_str), categories=URUTAN_BULAN, ordered=True)
+    df_all["BULAN"] = pd.Categorical(
+        df_all["BULAN"].apply(norm_str),
+        categories=URUTAN_BULAN,
+        ordered=True
+    )
 
     # kabupaten normalization (required for linking)
     if "KABUPATEN" in df_all.columns:
@@ -108,8 +115,8 @@ def adf_status(series: pd.Series):
 # LOAD & PREP DB2 (People analytics)
 # =========================
 @st.cache_data(ttl=300)
-def load_db2_people(uploaded_file) -> pd.DataFrame:
-    df = pd.read_excel(uploaded_file)
+def load_db2_people(path_or_file) -> pd.DataFrame:
+    df = pd.read_excel(path_or_file)
 
     # rename persis seperti kode kamu
     df.columns = [
@@ -169,24 +176,34 @@ def spearman_strength(rho: float) -> str:
 # =========================
 st.title("📊 Dashboard KB Terintegrasi (Stok × SDM × Administrasi)")
 
+# =========================
+# LOAD DATA FROM REPO (NO UPLOAD)
+# =========================
 with st.sidebar:
-    st.header("Upload Data")
-    f_db1 = st.file_uploader("DB1 — Persediaan Kontrasepsi (Excel multi-sheet Jan–Des)", type=["xlsx", "xls"], key="db1")
-    f_db2 = st.file_uploader("DB2 — Tempat KB & Tenaga Kesehatan (Excel)", type=["xlsx", "xls"], key="db2")
+    st.header("Sumber Data (Repository)")
+    st.caption("Aplikasi membaca file Excel dari folder `data/` di repo.")
 
-if not f_db1 or not f_db2:
-    st.info("Upload **kedua file** (DB1 dan DB2) agar dashboard bisa saling berketerkaitan.")
+DB1_PATH = os.path.join("data", "DATA_KETERSEDIAAN_ALAT_DAN_OBAT_KONTRASEPSI.xlsx")
+DB2_PATH = os.path.join("data", "Jumlah_tempat_pelayanan_kb_tenaga_kesehatan_administrasi.xlsx")
+
+if not os.path.exists(DB1_PATH):
+    st.error(f"File DB1 tidak ditemukan: {DB1_PATH}")
     st.stop()
 
-# Load
+if not os.path.exists(DB2_PATH):
+    st.error(f"File DB2 tidak ditemukan: {DB2_PATH}")
+    st.stop()
+
 try:
-    df1_all = load_db1_time_series(f_db1)
-    df2 = load_db2_people(f_db2)
+    df1_all = load_db1_time_series(DB1_PATH)
+    df2 = load_db2_people(DB2_PATH)
 except Exception as e:
     st.error(f"Gagal memproses data: {e}")
     st.stop()
 
-# Build integrated dataset
+# =========================
+# INTEGRATE
+# =========================
 df1_kab = db1_agg_per_kab(df1_all)  # stok tahunan per kab
 df_int = df2.merge(df1_kab, on="KABUPATEN", how="inner")
 
