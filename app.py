@@ -17,109 +17,161 @@ except Exception:
 st.set_page_config(page_title="Dashboard KB Terintegrasi", layout="wide")
 
 # =========================
-# CSS (LIGHT UI + ICON SIDEBAR + TOPBAR FILTER)
+# CSS: LIGHT + BLUE THEME + FIX DARK TABLES
 # =========================
 st.markdown(
     """
 <style>
+:root{
+  --bg1: #f3f7ff;
+  --bg2: #eef2ff;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: rgba(15,23,42,0.62);
+  --border: rgba(15,23,42,0.10);
+  --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  --blue: #2563eb;
+  --blue2: #60a5fa;
+}
+
 /* App background */
 [data-testid="stAppViewContainer"]{
-  background: linear-gradient(180deg, #f4f6fb 0%, #eef2ff 100%);
+  background: radial-gradient(1200px 600px at 20% 10%, rgba(37,99,235,0.20), transparent 60%),
+              radial-gradient(900px 500px at 80% 20%, rgba(96,165,250,0.18), transparent 55%),
+              linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
 }
 
 /* Hide Streamlit header */
 header {visibility: hidden; height: 0px;}
 
-/* Fix: force DARK text in main area (prevents white text on white cards) */
+/* Force dark text in MAIN */
 section.main, section.main *{
-  color: #0f172a !important;
+  color: var(--text) !important;
 }
 
-/* Sidebar -> icon bar */
+/* Sidebar */
 [data-testid="stSidebar"]{
-  background: #ffffff;
-  border-right: 1px solid rgba(15, 23, 42, 0.08);
+  background: var(--card);
+  border-right: 1px solid var(--border);
 }
-[data-testid="stSidebar"] > div:first-child{
-  padding-top: 10px;
-}
-
-/* Make sidebar narrow */
 [data-testid="stSidebar"]{
   min-width: 86px !important;
   max-width: 86px !important;
   width: 86px !important;
 }
 
-/* Radio group inside sidebar: icon buttons */
-[data-testid="stSidebar"] div[role="radiogroup"]{
-  gap: 10px;
-}
+/* Sidebar icon radio buttons */
+[data-testid="stSidebar"] div[role="radiogroup"]{ gap: 10px; }
 [data-testid="stSidebar"] div[role="radiogroup"] label{
   justify-content: center !important;
   padding: 10px 0px !important;
   border-radius: 14px !important;
   margin: 0px 8px !important;
   background: transparent;
+  border: 1px solid transparent;
 }
 [data-testid="stSidebar"] div[role="radiogroup"] label:hover{
-  background: rgba(99, 102, 241, 0.10);
+  background: rgba(37,99,235,0.10);
+  border: 1px solid rgba(37,99,235,0.20);
 }
 [data-testid="stSidebar"] div[role="radiogroup"] label p{
-  font-size: 20px !important; /* icon size */
+  font-size: 20px !important;
   margin: 0 !important;
 }
+[data-testid="stSidebar"] .stRadio > label{ display: none; }
 
-/* Hide the radio title/label */
-[data-testid="stSidebar"] .stRadio > label{
-  display: none;
-}
-
-/* Topbar card */
+/* Topbar */
 .topbar{
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 18px;
   padding: 14px 16px;
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow);
+}
+.topbar b{
+  color: var(--text) !important;
+}
+.topbar .crumb{
+  color: var(--muted) !important;
+  margin-left: 10px;
 }
 
-/* Content card */
+/* Cards */
 .card{
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 18px;
   padding: 14px 16px;
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow);
 }
 
-/* Metric cards */
+/* Metrics */
 [data-testid="stMetric"]{
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: var(--card);
+  border: 1px solid var(--border);
   border-radius: 16px;
   padding: 12px 12px;
-  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
+  box-shadow: var(--shadow);
+}
+section.main [data-testid="stMetricLabel"]{ color: var(--muted) !important; }
+section.main [data-testid="stMetricValue"]{ color: var(--text) !important; }
+
+/* Inputs: selectbox / multiselect background */
+section.main [data-baseweb="select"] > div{
+  background: var(--card) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+}
+section.main [data-baseweb="select"] span{
+  color: var(--text) !important;
 }
 
-/* Metric text colors */
-section.main [data-testid="stMetricLabel"]{
-  color: rgba(15,23,42,0.65) !important;
+/* Tags on multiselect */
+section.main span[data-baseweb="tag"]{
+  background: rgba(37,99,235,0.10) !important;
+  border: 1px solid rgba(37,99,235,0.25) !important;
+  border-radius: 999px !important;
 }
-section.main [data-testid="stMetricValue"]{
-  color: #0f172a !important;
-}
-section.main [data-testid="stMetricDelta"]{
-  color: rgba(15,23,42,0.55) !important;
+section.main span[data-baseweb="tag"] *{
+  color: var(--blue) !important;
 }
 
-/* Slightly reduce top padding */
-.block-container{padding-top: 18px; max-width: 1200px;}
+/* Buttons */
+section.main .stDownloadButton button,
+section.main .stButton button{
+  background: var(--blue) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(37,99,235,0.40) !important;
+  border-radius: 12px !important;
+}
+section.main .stDownloadButton button:hover,
+section.main .stButton button:hover{
+  background: #1d4ed8 !important;
+}
 
-/* Make dataframe edges smooth */
+/* Dataframe: force LIGHT (fix black table) */
 [data-testid="stDataFrame"]{
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+[data-testid="stDataFrame"] *{
+  color: var(--text) !important;
+}
+[data-testid="stDataFrame"] [role="grid"]{
+  background: var(--card) !important;
+}
+
+/* Plotly chart background (Streamlit charts) */
+.js-plotly-plot .plotly, .js-plotly-plot .plotly div{
+  background: transparent !important;
+}
+
+/* Layout width */
+.block-container{
+  padding-top: 18px;
+  max-width: 1200px;
 }
 </style>
 """,
@@ -152,27 +204,23 @@ def norm_str(x):
     return str(x).strip().upper()
 
 # =========================
-# LOAD & PREP DB1 (Time series)
+# LOAD & PREP DB1
 # =========================
 @st.cache_data(ttl=300)
 def load_db1_time_series(path_or_file) -> pd.DataFrame:
     xls = pd.ExcelFile(path_or_file)
     all_data = []
-
     for sheet in xls.sheet_names:
         df = pd.read_excel(path_or_file, sheet_name=sheet)
         df["BULAN"] = norm_str(sheet)
         all_data.append(df)
-
     df_all = pd.concat(all_data, ignore_index=True)
 
     miss = [c for c in KOLUM_NUMERIK_DB1 if c not in df_all.columns]
     if miss:
         raise ValueError(f"DB1: kolom numerik tidak ditemukan: {miss}")
 
-    df_all[KOLUM_NUMERIK_DB1] = df_all[KOLUM_NUMERIK_DB1].apply(
-        pd.to_numeric, errors="coerce"
-    ).fillna(0)
+    df_all[KOLUM_NUMERIK_DB1] = df_all[KOLUM_NUMERIK_DB1].apply(pd.to_numeric, errors="coerce").fillna(0)
 
     df_all["SUNTIK"] = (
         df_all["SUNTIKAN 1 BULANAN"]
@@ -201,11 +249,7 @@ def db1_ts_per_kab(df_all: pd.DataFrame, kabupaten: str) -> pd.DataFrame:
     return out
 
 def db1_agg_per_kab(df_all: pd.DataFrame) -> pd.DataFrame:
-    out = (
-        df_all[["KABUPATEN"] + VAR_STOK]
-        .groupby("KABUPATEN", as_index=False)
-        .sum()
-    )
+    out = df_all[["KABUPATEN"] + VAR_STOK].groupby("KABUPATEN", as_index=False).sum()
     out["TOTAL_STOK"] = out[VAR_STOK].sum(axis=1)
     return out
 
@@ -220,7 +264,7 @@ def adf_status(series: pd.Series):
     return p, status
 
 # =========================
-# LOAD & PREP DB2 (People analytics)
+# LOAD & PREP DB2
 # =========================
 @st.cache_data(ttl=300)
 def load_db2_people(path_or_file) -> pd.DataFrame:
@@ -265,7 +309,6 @@ def load_db2_people(path_or_file) -> pd.DataFrame:
         "tenaga_kesehatan_total"
     ]
     df[int_cols] = df[int_cols].round(0).astype("Int64")
-
     df["KABUPATEN"] = df["kabupaten"].str.upper()
     return df
 
@@ -300,11 +343,10 @@ except Exception as e:
 df1_kab = db1_agg_per_kab(df1_all)
 df_int = df2.merge(df1_kab, on="KABUPATEN", how="inner")
 
-missing_link = set(df2["KABUPATEN"]) - set(df1_kab["KABUPATEN"])
-if len(missing_link) > 0:
-    st.warning(f"Ada {len(missing_link)} kabupaten di DB2 yang tidak ketemu di DB1 (beda penulisan).")
-
 kab_list = sorted(df_int["KABUPATEN"].unique().tolist())
+if len(kab_list) == 0:
+    st.error("Tidak ada kabupaten yang berhasil terhubung (cek penulisan kolom KABUPATEN di kedua file).")
+    st.stop()
 
 # =========================
 # ICON NAV (LEFT)
@@ -335,30 +377,26 @@ with st.sidebar:
     )
 
 # =========================
-# TOPBAR (Filter kanan atas)
+# TOPBAR + FILTER (KANAN ATAS)
 # =========================
 top_l, top_r = st.columns([2.6, 1.2], vertical_alignment="center")
-
 with top_l:
     st.markdown(
         f"""
         <div class="topbar">
           <b>Dashboard KB Terintegrasi</b>
-          <span style="color:rgba(15,23,42,0.6); margin-left:10px;">
-            {MENU_NAME[menu_key]}
-          </span>
+          <span class="crumb">{MENU_NAME[menu_key]}</span>
         </div>
         """,
         unsafe_allow_html=True
     )
-
 with top_r:
     kab = st.selectbox("Kabupaten", kab_list, index=0, label_visibility="collapsed")
 
 st.write("")
 
 # =========================
-# KPIs
+# KPI ROW
 # =========================
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Kabupaten terhubung", f"{df_int['KABUPATEN'].nunique():,}")
@@ -385,7 +423,7 @@ if menu_key == "SUMMARY":
         st.dataframe(top10_stok[["KABUPATEN","TOTAL_STOK","SUNTIK","PIL","IMPLAN","KONDOM","IUD"]], use_container_width=True)
 
 elif menu_key == "TS":
-    st.markdown(f"<div class='card'><b>Deret Waktu Persediaan</b><br/><span style='color:rgba(15,23,42,0.6)'>{kab}</span></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>Deret Waktu Persediaan</b><br/><span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>", unsafe_allow_html=True)
 
     df_ts = db1_ts_per_kab(df1_all, kab)
     vsel = st.multiselect("Variabel stok", VAR_STOK, default=VAR_STOK)
@@ -403,7 +441,7 @@ elif menu_key == "TS":
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 elif menu_key == "PEOPLE":
-    st.markdown(f"<div class='card'><b>People Analytics</b><br/><span style='color:rgba(15,23,42,0.6)'>{kab}</span></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>People Analytics</b><br/><span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>", unsafe_allow_html=True)
 
     row = df_int[df_int["KABUPATEN"] == kab].iloc[0]
     a1, a2, a3, a4 = st.columns(4)
@@ -425,7 +463,7 @@ elif menu_key == "PEOPLE":
     )
 
 elif menu_key == "LINK":
-    st.markdown("<div class='card'><b>Analisis Keterkaitan</b><br/><span style='color:rgba(15,23,42,0.6)'>Spearman + Mann–Whitney</span></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Analisis Keterkaitan</b><br/><span style='color:rgba(15,23,42,0.62)'>Spearman + Mann–Whitney</span></div>", unsafe_allow_html=True)
 
     x_opts = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
     y_opts = ["TOTAL_STOK"] + VAR_STOK
@@ -451,7 +489,7 @@ elif menu_key == "LINK":
 
         st.scatter_chart(d.set_index("KABUPATEN")[[x_var, y_var]])
 
-    st.markdown("<div class='card'><b>Uji beda (Mann–Whitney)</b><br/><span style='color:rgba(15,23,42,0.6)'>Admin ada vs Admin tidak</span></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Uji beda (Mann–Whitney)</b><br/><span style='color:rgba(15,23,42,0.62)'>Admin ada vs Admin tidak</span></div>", unsafe_allow_html=True)
 
     d2 = df_int[[y_var, "administrasi"]].dropna()
     g_admin = d2[d2["administrasi"].astype(float) > 0][y_var].astype(float)
