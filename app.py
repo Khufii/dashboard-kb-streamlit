@@ -184,7 +184,7 @@ with st.sidebar:
     st.caption("Aplikasi membaca file Excel dari folder `data/` di repo.")
 
 DB1_PATH = os.path.join("data", "DATA KETERSEDIAAN ALAT DAN OBAT KONTRASEPSI.xlsx")
-DB2_PATH = os.path.join("data", "Jumlah tempat pelayanan kb tenaga kesehatan administrasi.xlsx")
+DB2_PATH = os.path.join("data", "Jumlah tempat pelayanan kb yang memiliki tenaga kesehatan dan administrasi.xlsx")
 
 if not os.path.exists(DB1_PATH):
     st.error(f"File DB1 tidak ditemukan: {DB1_PATH}")
