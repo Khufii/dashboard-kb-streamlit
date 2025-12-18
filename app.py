@@ -2,7 +2,8 @@ import os
 import streamlit as st
 import pandas as pd
 import numpy as np
-from scipy.stats import spearmanr, mannwhitneyu
+
+from scipy.stats import spearmanr, mannwhitneyu, kruskal
 
 # optional (ADF)
 try:
@@ -14,10 +15,15 @@ except Exception:
 # =========================
 # PAGE CONFIG
 # =========================
-st.set_page_config(page_title="Dashboard KB Terintegrasi", layout="wide")
+st.set_page_config(
+    page_title="Dashboard KB Terintegrasi",
+    layout="wide",
+    initial_sidebar_state="expanded"  # <-- pastikan sidebar muncul
+)
 
 # =========================
-# CSS: LIGHT + BLUE THEME + FIX DARK TABLES
+# CSS: LIGHT + BLUE THEME
+# (JANGAN hide header total supaya tombol sidebar tetap ada)
 # =========================
 st.markdown(
     """
@@ -31,7 +37,6 @@ st.markdown(
   --border: rgba(15,23,42,0.10);
   --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
   --blue: #2563eb;
-  --blue2: #60a5fa;
 }
 
 /* App background */
@@ -40,9 +45,6 @@ st.markdown(
               radial-gradient(900px 500px at 80% 20%, rgba(96,165,250,0.18), transparent 55%),
               linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
 }
-
-/* Hide Streamlit header */
-header {visibility: hidden; height: 0px;}
 
 /* Force dark text in MAIN */
 section.main, section.main *{
@@ -54,19 +56,21 @@ section.main, section.main *{
   background: var(--card);
   border-right: 1px solid var(--border);
 }
+
+/* Make sidebar narrow (icon bar) */
 [data-testid="stSidebar"]{
-  min-width: 86px !important;
-  max-width: 86px !important;
-  width: 86px !important;
+  min-width: 90px !important;
+  max-width: 90px !important;
+  width: 90px !important;
 }
 
-/* Sidebar icon radio buttons */
+/* Radio group inside sidebar: icon buttons */
 [data-testid="stSidebar"] div[role="radiogroup"]{ gap: 10px; }
 [data-testid="stSidebar"] div[role="radiogroup"] label{
   justify-content: center !important;
   padding: 10px 0px !important;
   border-radius: 14px !important;
-  margin: 0px 8px !important;
+  margin: 0px 10px !important;
   background: transparent;
   border: 1px solid transparent;
 }
@@ -88,13 +92,8 @@ section.main, section.main *{
   padding: 14px 16px;
   box-shadow: var(--shadow);
 }
-.topbar b{
-  color: var(--text) !important;
-}
-.topbar .crumb{
-  color: var(--muted) !important;
-  margin-left: 10px;
-}
+.topbar b{ color: var(--text) !important; }
+.topbar .crumb{ color: var(--muted) !important; margin-left: 10px; }
 
 /* Cards */
 .card{
@@ -116,62 +115,36 @@ section.main, section.main *{
 section.main [data-testid="stMetricLabel"]{ color: var(--muted) !important; }
 section.main [data-testid="stMetricValue"]{ color: var(--text) !important; }
 
-/* Inputs: selectbox / multiselect background */
+/* Inputs */
 section.main [data-baseweb="select"] > div{
   background: var(--card) !important;
   border: 1px solid var(--border) !important;
   border-radius: 12px !important;
 }
-section.main [data-baseweb="select"] span{
-  color: var(--text) !important;
-}
+section.main [data-baseweb="select"] span{ color: var(--text) !important; }
 
-/* Tags on multiselect */
+/* Tags */
 section.main span[data-baseweb="tag"]{
   background: rgba(37,99,235,0.10) !important;
   border: 1px solid rgba(37,99,235,0.25) !important;
   border-radius: 999px !important;
 }
-section.main span[data-baseweb="tag"] *{
-  color: var(--blue) !important;
-}
+section.main span[data-baseweb="tag"] *{ color: var(--blue) !important; }
 
-/* Buttons */
-section.main .stDownloadButton button,
-section.main .stButton button{
-  background: var(--blue) !important;
-  color: #ffffff !important;
-  border: 1px solid rgba(37,99,235,0.40) !important;
-  border-radius: 12px !important;
-}
-section.main .stDownloadButton button:hover,
-section.main .stButton button:hover{
-  background: #1d4ed8 !important;
-}
-
-/* Dataframe: force LIGHT (fix black table) */
+/* Dataframe (force light) */
 [data-testid="stDataFrame"]{
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
-[data-testid="stDataFrame"] *{
-  color: var(--text) !important;
-}
-[data-testid="stDataFrame"] [role="grid"]{
-  background: var(--card) !important;
-}
-
-/* Plotly chart background (Streamlit charts) */
-.js-plotly-plot .plotly, .js-plotly-plot .plotly div{
-  background: transparent !important;
-}
+[data-testid="stDataFrame"] *{ color: var(--text) !important; }
+[data-testid="stDataFrame"] [role="grid"]{ background: var(--card) !important; }
 
 /* Layout width */
 .block-container{
-  padding-top: 18px;
-  max-width: 1200px;
+  padding-top: 12px;
+  max-width: 1220px;
 }
 </style>
 """,
@@ -199,6 +172,7 @@ KOLUM_NUMERIK_DB1 = [
 ]
 
 VAR_STOK = ["SUNTIK", "PIL", "IMPLAN", "KONDOM", "IUD"]
+VAR_ALL_STOK = ["TOTAL_STOK"] + VAR_STOK
 
 def norm_str(x):
     return str(x).strip().upper()
@@ -236,11 +210,10 @@ def load_db1_time_series(path_or_file) -> pd.DataFrame:
         ordered=True
     )
 
-    if "KABUPATEN" in df_all.columns:
-        df_all["KABUPATEN"] = df_all["KABUPATEN"].astype(str).str.strip().str.upper()
-    else:
+    if "KABUPATEN" not in df_all.columns:
         raise ValueError("DB1: kolom 'KABUPATEN' tidak ditemukan (dibutuhkan untuk keterkaitan).")
 
+    df_all["KABUPATEN"] = df_all["KABUPATEN"].astype(str).str.strip().str.upper()
     return df_all
 
 def db1_ts_per_kab(df_all: pd.DataFrame, kabupaten: str) -> pd.DataFrame:
@@ -309,6 +282,7 @@ def load_db2_people(path_or_file) -> pd.DataFrame:
         "tenaga_kesehatan_total"
     ]
     df[int_cols] = df[int_cols].round(0).astype("Int64")
+
     df["KABUPATEN"] = df["kabupaten"].str.upper()
     return df
 
@@ -351,12 +325,13 @@ if len(kab_list) == 0:
 # =========================
 # ICON NAV (LEFT)
 # =========================
-MENU_KEYS = ["SUMMARY", "TS", "PEOPLE", "LINK", "DATASET"]
+MENU_KEYS = ["SUMMARY", "TS", "PEOPLE", "LINK", "KRUSKAL", "DATASET"]
 MENU_ICON = {
     "SUMMARY": "🏠",
     "TS": "📈",
     "PEOPLE": "👥",
     "LINK": "🔗",
+    "KRUSKAL": "🧪",
     "DATASET": "🗂️",
 }
 MENU_NAME = {
@@ -364,6 +339,7 @@ MENU_NAME = {
     "TS": "Deret Waktu",
     "PEOPLE": "People Analytics",
     "LINK": "Keterkaitan",
+    "KRUSKAL": "Kruskal–Wallis",
     "DATASET": "Dataset",
 }
 
@@ -379,7 +355,7 @@ with st.sidebar:
 # =========================
 # TOPBAR + FILTER (KANAN ATAS)
 # =========================
-top_l, top_r = st.columns([2.6, 1.2], vertical_alignment="center")
+top_l, top_r = st.columns([2.7, 1.3], vertical_alignment="center")
 with top_l:
     st.markdown(
         f"""
@@ -398,12 +374,11 @@ st.write("")
 # =========================
 # KPI ROW
 # =========================
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Kabupaten terhubung", f"{df_int['KABUPATEN'].nunique():,}")
-c2.metric("Total Tempat KB", f"{int(df_int['tempat_kb'].fillna(0).sum()):,}")
-c3.metric("Total Tenaga Kesehatan", f"{int(df_int['tenaga_kesehatan_total'].fillna(0).sum()):,}")
-c4.metric("Total Stok (setahun)", f"{float(df_int['TOTAL_STOK'].fillna(0).sum()):,.0f}")
-
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Kabupaten terhubung", f"{df_int['KABUPATEN'].nunique():,}")
+k2.metric("Total Tempat KB", f"{int(df_int['tempat_kb'].fillna(0).sum()):,}")
+k3.metric("Total Tenaga Kesehatan", f"{int(df_int['tenaga_kesehatan_total'].fillna(0).sum()):,}")
+k4.metric("Total Stok (setahun)", f"{float(df_int['TOTAL_STOK'].fillna(0).sum()):,.0f}")
 st.write("")
 
 # =========================
@@ -417,22 +392,39 @@ if menu_key == "SUMMARY":
         top10_sdm = df_int.sort_values("tenaga_kesehatan_total", ascending=False).head(10)
         st.dataframe(top10_sdm[["KABUPATEN","tempat_kb","tenaga_kesehatan_total","administrasi"]], use_container_width=True)
 
+        st.markdown("<div class='card'><b>Grafik Top 10 — Tenaga Kesehatan</b></div>", unsafe_allow_html=True)
+        chart_df = top10_sdm.set_index("KABUPATEN")[["tenaga_kesehatan_total"]]
+        st.bar_chart(chart_df, use_container_width=True)
+
     with right:
         st.markdown("<div class='card'><b>Top 10 — Total Stok Setahun</b></div>", unsafe_allow_html=True)
         top10_stok = df_int.sort_values("TOTAL_STOK", ascending=False).head(10)
         st.dataframe(top10_stok[["KABUPATEN","TOTAL_STOK","SUNTIK","PIL","IMPLAN","KONDOM","IUD"]], use_container_width=True)
 
+        st.markdown("<div class='card'><b>Grafik Top 10 — Total Stok</b></div>", unsafe_allow_html=True)
+        chart_df2 = top10_stok.set_index("KABUPATEN")[["TOTAL_STOK"]]
+        st.bar_chart(chart_df2, use_container_width=True)
+
 elif menu_key == "TS":
     st.markdown(f"<div class='card'><b>Deret Waktu Persediaan</b><br/><span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>", unsafe_allow_html=True)
 
     df_ts = db1_ts_per_kab(df1_all, kab)
-    vsel = st.multiselect("Variabel stok", VAR_STOK, default=VAR_STOK)
 
+    vsel = st.multiselect("Variabel stok", VAR_STOK, default=VAR_STOK)
     if vsel:
         st.line_chart(df_ts.set_index("BULAN")[vsel], use_container_width=True)
     else:
         st.info("Pilih minimal 1 variabel.")
 
+    # Moving average tambahan
+    st.markdown("<div class='card'><b>Moving Average (3 bulan)</b></div>", unsafe_allow_html=True)
+    ma_df = df_ts.copy()
+    for v in VAR_STOK:
+        ma_df[f"MA3_{v}"] = ma_df[v].rolling(3).mean()
+    show_ma = [f"MA3_{v}" for v in vsel] if vsel else [f"MA3_{v}" for v in VAR_STOK]
+    st.line_chart(ma_df.set_index("BULAN")[show_ma], use_container_width=True)
+
+    # ADF
     st.markdown("<div class='card'><b>Uji stasioneritas (ADF)</b></div>", unsafe_allow_html=True)
     rows = []
     for v in VAR_STOK:
@@ -451,10 +443,11 @@ elif menu_key == "PEOPLE":
     a4.metric("Total Stok Setahun", f"{float(row['TOTAL_STOK']):,.0f}")
 
     st.markdown("<div class='card'><b>Komposisi stok setahun</b></div>", unsafe_allow_html=True)
-    st.dataframe(
-        pd.DataFrame({"Metode": VAR_STOK, "Total Setahun": [float(row[v]) for v in VAR_STOK]}),
-        use_container_width=True
-    )
+    comp = pd.DataFrame({"Metode": VAR_STOK, "Total Setahun": [float(row[v]) for v in VAR_STOK]})
+    st.dataframe(comp, use_container_width=True)
+
+    st.markdown("<div class='card'><b>Grafik komposisi stok (Bar)</b></div>", unsafe_allow_html=True)
+    st.bar_chart(comp.set_index("Metode"), use_container_width=True)
 
     st.markdown("<div class='card'><b>Deskriptif variabel kunci</b></div>", unsafe_allow_html=True)
     st.dataframe(
@@ -463,10 +456,10 @@ elif menu_key == "PEOPLE":
     )
 
 elif menu_key == "LINK":
-    st.markdown("<div class='card'><b>Analisis Keterkaitan</b><br/><span style='color:rgba(15,23,42,0.62)'>Spearman + Mann–Whitney</span></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Analisis Keterkaitan</b><br/><span style='color:rgba(15,23,42,0.62)'>Spearman + Scatter</span></div>", unsafe_allow_html=True)
 
     x_opts = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
-    y_opts = ["TOTAL_STOK"] + VAR_STOK
+    y_opts = VAR_ALL_STOK
 
     cx1, cx2 = st.columns(2)
     with cx1:
@@ -474,10 +467,9 @@ elif menu_key == "LINK":
     with cx2:
         y_var = st.selectbox("Variabel Stok (Y)", y_opts, index=0)
 
-    d = df_int[[x_var, y_var, "KABUPATEN", "administrasi"]].dropna()
-
+    d = df_int[[x_var, y_var, "KABUPATEN"]].dropna()
     if len(d) < 5:
-        st.warning("Data valid terlalu sedikit untuk analisis korelasi.")
+        st.warning("Data valid terlalu sedikit untuk analisis.")
     else:
         rho, p = spearmanr(d[x_var], d[y_var], nan_policy="omit")
         strength = spearman_strength(rho)
@@ -487,28 +479,80 @@ elif menu_key == "LINK":
         m2.metric("p-value", f"{p:.4f}")
         m3.metric("Kekuatan", strength)
 
-        st.scatter_chart(d.set_index("KABUPATEN")[[x_var, y_var]])
+        # Scatter
+        st.markdown("<div class='card'><b>Scatter</b></div>", unsafe_allow_html=True)
+        st.scatter_chart(d.set_index("KABUPATEN")[[x_var, y_var]], use_container_width=True)
 
-    st.markdown("<div class='card'><b>Uji beda (Mann–Whitney)</b><br/><span style='color:rgba(15,23,42,0.62)'>Admin ada vs Admin tidak</span></div>", unsafe_allow_html=True)
+    # Heatmap-like table (Spearman matrix) sederhana
+    st.markdown("<div class='card'><b>Matriks korelasi Spearman (People vs Stok)</b></div>", unsafe_allow_html=True)
+    people_vars = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
+    stok_vars = ["TOTAL_STOK"] + VAR_STOK
+    corr_rows = []
+    for px in people_vars:
+        for sy in stok_vars:
+            dd = df_int[[px, sy]].dropna()
+            if len(dd) >= 5:
+                r, pv = spearmanr(dd[px], dd[sy], nan_policy="omit")
+            else:
+                r, pv = np.nan, np.nan
+            corr_rows.append({"People": px, "Stok": sy, "rho": r, "p_value": pv})
+    corr_df = pd.DataFrame(corr_rows)
+    st.dataframe(corr_df, use_container_width=True)
 
-    d2 = df_int[[y_var, "administrasi"]].dropna()
-    g_admin = d2[d2["administrasi"].astype(float) > 0][y_var].astype(float)
-    g_no = d2[d2["administrasi"].astype(float) == 0][y_var].astype(float)
+elif menu_key == "KRUSKAL":
+    st.markdown("<div class='card'><b>Uji Kruskal–Wallis</b><br/><span style='color:rgba(15,23,42,0.62)'>Perbedaan stok antar grup Administrasi</span></div>", unsafe_allow_html=True)
 
-    if len(g_admin) == 0 or len(g_no) == 0:
-        st.warning("Tidak cukup data untuk membagi grup admin > 0 vs admin = 0.")
+    y_var = st.selectbox("Variabel stok untuk diuji", VAR_ALL_STOK, index=0)
+
+    # Buat grup berdasarkan jumlah administrasi
+    # 0 | 1-2 | 3-5 | >5  (boleh kamu ubah)
+    d = df_int[[y_var, "administrasi"]].dropna()
+    d["administrasi"] = d["administrasi"].astype(float)
+    d[y_var] = d[y_var].astype(float)
+
+    def admin_group(a):
+        if a == 0: return "0"
+        if a <= 2: return "1-2"
+        if a <= 5: return "3-5"
+        return ">5"
+
+    d["admin_group"] = d["administrasi"].apply(admin_group)
+
+    groups = []
+    labels = []
+    for g in ["0", "1-2", "3-5", ">5"]:
+        vals = d[d["admin_group"] == g][y_var].dropna().values
+        if len(vals) > 0:
+            groups.append(vals)
+            labels.append(g)
+
+    if len(groups) < 2:
+        st.warning("Grup tidak cukup untuk Kruskal (minimal 2 grup dengan data).")
     else:
-        u, p_mw = mannwhitneyu(g_admin, g_no, alternative="two-sided")
-        n1, n2, n3, n4 = st.columns(4)
-        n1.metric("U", f"{u:.3f}")
-        n2.metric("p-value", f"{p_mw:.4f}")
-        n3.metric("Median (Admin ada)", f"{float(np.median(g_admin)):.3f}")
-        n4.metric("Median (Admin tidak)", f"{float(np.median(g_no)):.3f}")
+        stat, p_kw = kruskal(*groups)
+        c1, c2 = st.columns(2)
+        c1.metric("Kruskal H", f"{stat:.3f}")
+        c2.metric("p-value", f"{p_kw:.4f}")
 
-        if p_mw < 0.05:
-            st.success("Ada perbedaan signifikan (α=5%).")
+        if p_kw < 0.05:
+            st.success("Ada perbedaan signifikan antar grup (α=5%).")
         else:
-            st.info("Tidak ada perbedaan signifikan (α=5%).")
+            st.info("Tidak ada perbedaan signifikan antar grup (α=5%).")
+
+        st.markdown("<div class='card'><b>Ringkasan per grup</b></div>", unsafe_allow_html=True)
+        summary = (
+            d.groupby("admin_group")[y_var]
+            .agg(["count", "median", "mean"])
+            .reindex(labels)
+            .reset_index()
+            .rename(columns={"admin_group": "Grup Admin"})
+        )
+        st.dataframe(summary, use_container_width=True)
+
+        # Box plot sederhana via st.bar_chart median per grup
+        st.markdown("<div class='card'><b>Grafik Median per Grup (aproksimasi boxplot)</b></div>", unsafe_allow_html=True)
+        med = d.groupby("admin_group")[y_var].median().reindex(labels)
+        st.bar_chart(med, use_container_width=True)
 
 elif menu_key == "DATASET":
     st.markdown("<div class='card'><b>Dataset Terintegrasi (hasil join)</b></div>", unsafe_allow_html=True)
