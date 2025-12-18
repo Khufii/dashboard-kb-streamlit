@@ -11,10 +11,13 @@ try:
 except Exception:
     HAS_STATSMODELS = False
 
+# =========================
+# PAGE CONFIG
+# =========================
 st.set_page_config(page_title="Dashboard KB Terintegrasi", layout="wide")
 
 # =========================
-# CSS: Sidebar jadi icon bar + topbar style
+# CSS (LIGHT UI + ICON SIDEBAR + TOPBAR FILTER)
 # =========================
 st.markdown(
     """
@@ -24,8 +27,13 @@ st.markdown(
   background: linear-gradient(180deg, #f4f6fb 0%, #eef2ff 100%);
 }
 
-/* Hide Streamlit header spacing */
+/* Hide Streamlit header */
 header {visibility: hidden; height: 0px;}
+
+/* Fix: force DARK text in main area (prevents white text on white cards) */
+section.main, section.main *{
+  color: #0f172a !important;
+}
 
 /* Sidebar -> icon bar */
 [data-testid="stSidebar"]{
@@ -33,7 +41,7 @@ header {visibility: hidden; height: 0px;}
   border-right: 1px solid rgba(15, 23, 42, 0.08);
 }
 [data-testid="stSidebar"] > div:first-child{
-  padding-top: 12px;
+  padding-top: 10px;
 }
 
 /* Make sidebar narrow */
@@ -43,26 +51,26 @@ header {visibility: hidden; height: 0px;}
   width: 86px !important;
 }
 
-/* Center radio items and make them look like icon buttons */
-div[role="radiogroup"]{
+/* Radio group inside sidebar: icon buttons */
+[data-testid="stSidebar"] div[role="radiogroup"]{
   gap: 10px;
 }
-div[role="radiogroup"] label{
+[data-testid="stSidebar"] div[role="radiogroup"] label{
   justify-content: center !important;
   padding: 10px 0px !important;
   border-radius: 14px !important;
   margin: 0px 8px !important;
   background: transparent;
 }
-div[role="radiogroup"] label:hover{
+[data-testid="stSidebar"] div[role="radiogroup"] label:hover{
   background: rgba(99, 102, 241, 0.10);
 }
-div[role="radiogroup"] label p{
-  font-size: 20px !important;     /* icon size */
+[data-testid="stSidebar"] div[role="radiogroup"] label p{
+  font-size: 20px !important; /* icon size */
   margin: 0 !important;
 }
 
-/* Remove sidebar text label spacing */
+/* Hide the radio title/label */
 [data-testid="stSidebar"] .stRadio > label{
   display: none;
 }
@@ -85,7 +93,7 @@ div[role="radiogroup"] label p{
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
 }
 
-/* Make st.metric cards cleaner */
+/* Metric cards */
 [data-testid="stMetric"]{
   background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -94,8 +102,25 @@ div[role="radiogroup"] label p{
   box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
 }
 
-/* reduce vertical gaps */
-.block-container{padding-top: 18px;}
+/* Metric text colors */
+section.main [data-testid="stMetricLabel"]{
+  color: rgba(15,23,42,0.65) !important;
+}
+section.main [data-testid="stMetricValue"]{
+  color: #0f172a !important;
+}
+section.main [data-testid="stMetricDelta"]{
+  color: rgba(15,23,42,0.55) !important;
+}
+
+/* Slightly reduce top padding */
+.block-container{padding-top: 18px; max-width: 1200px;}
+
+/* Make dataframe edges smooth */
+[data-testid="stDataFrame"]{
+  border-radius: 12px;
+  overflow: hidden;
+}
 </style>
 """,
     unsafe_allow_html=True
@@ -295,7 +320,7 @@ MENU_ICON = {
 MENU_NAME = {
     "SUMMARY": "Summary",
     "TS": "Deret Waktu",
-    "PEOPLE": "People",
+    "PEOPLE": "People Analytics",
     "LINK": "Keterkaitan",
     "DATASET": "Dataset",
 }
@@ -328,13 +353,12 @@ with top_l:
     )
 
 with top_r:
-    # filter pojok kanan atas
     kab = st.selectbox("Kabupaten", kab_list, index=0, label_visibility="collapsed")
 
-st.write("")  # sedikit jarak
+st.write("")
 
 # =========================
-# KPI ROW (main area)
+# KPIs
 # =========================
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Kabupaten terhubung", f"{df_int['KABUPATEN'].nunique():,}")
@@ -345,32 +369,33 @@ c4.metric("Total Stok (setahun)", f"{float(df_int['TOTAL_STOK'].fillna(0).sum())
 st.write("")
 
 # =========================
-# CONTENT (per menu)
+# CONTENT
 # =========================
 if menu_key == "SUMMARY":
-    st.markdown("<div class='card'><b>Ringkasan</b><br/><span style='color:rgba(15,23,42,0.6)'>Top 10 lintas kabupaten</span></div>", unsafe_allow_html=True)
-    left, right = st.columns(2)
+    left, right = st.columns(2, gap="large")
 
     with left:
-        top10_sdm = df_int.sort_values("tenaga_kesehatan_total", ascending=False).head(10)
         st.markdown("<div class='card'><b>Top 10 — Tenaga Kesehatan Total</b></div>", unsafe_allow_html=True)
+        top10_sdm = df_int.sort_values("tenaga_kesehatan_total", ascending=False).head(10)
         st.dataframe(top10_sdm[["KABUPATEN","tempat_kb","tenaga_kesehatan_total","administrasi"]], use_container_width=True)
 
     with right:
-        top10_stok = df_int.sort_values("TOTAL_STOK", ascending=False).head(10)
         st.markdown("<div class='card'><b>Top 10 — Total Stok Setahun</b></div>", unsafe_allow_html=True)
+        top10_stok = df_int.sort_values("TOTAL_STOK", ascending=False).head(10)
         st.dataframe(top10_stok[["KABUPATEN","TOTAL_STOK","SUNTIK","PIL","IMPLAN","KONDOM","IUD"]], use_container_width=True)
 
 elif menu_key == "TS":
     st.markdown(f"<div class='card'><b>Deret Waktu Persediaan</b><br/><span style='color:rgba(15,23,42,0.6)'>{kab}</span></div>", unsafe_allow_html=True)
 
     df_ts = db1_ts_per_kab(df1_all, kab)
-
     vsel = st.multiselect("Variabel stok", VAR_STOK, default=VAR_STOK)
+
     if vsel:
         st.line_chart(df_ts.set_index("BULAN")[vsel], use_container_width=True)
+    else:
+        st.info("Pilih minimal 1 variabel.")
 
-    st.markdown("<div class='card'><b>ADF Test (Stasioneritas)</b></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Uji stasioneritas (ADF)</b></div>", unsafe_allow_html=True)
     rows = []
     for v in VAR_STOK:
         p, status = adf_status(df_ts[v])
@@ -386,6 +411,12 @@ elif menu_key == "PEOPLE":
     a2.metric("Tenaga Kesehatan Total", f"{int(row['tenaga_kesehatan_total']) if pd.notna(row['tenaga_kesehatan_total']) else 0:,}")
     a3.metric("Administrasi", f"{int(row['administrasi']) if pd.notna(row['administrasi']) else 0:,}")
     a4.metric("Total Stok Setahun", f"{float(row['TOTAL_STOK']):,.0f}")
+
+    st.markdown("<div class='card'><b>Komposisi stok setahun</b></div>", unsafe_allow_html=True)
+    st.dataframe(
+        pd.DataFrame({"Metode": VAR_STOK, "Total Setahun": [float(row[v]) for v in VAR_STOK]}),
+        use_container_width=True
+    )
 
     st.markdown("<div class='card'><b>Deskriptif variabel kunci</b></div>", unsafe_allow_html=True)
     st.dataframe(
