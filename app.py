@@ -5,27 +5,27 @@ import numpy as np
 
 from scipy.stats import spearmanr, mannwhitneyu, kruskal
 
-# optional (ADF)
+# Optional: ADF test (butuh statsmodels)
 try:
     from statsmodels.tsa.stattools import adfuller
     HAS_STATSMODELS = True
 except Exception:
     HAS_STATSMODELS = False
 
-# =========================
-# PAGE CONFIG
-# =========================
+
+# =========================================================
+# 1) KONFIGURASI HALAMAN
+# =========================================================
 st.set_page_config(
     page_title="Dashboard KB Terintegrasi",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# =========================
-# THEME CSS (COLORFUL)
-# =========================
-st.markdown(
-    """
+# =========================================================
+# 2) TEMA (CSS) - khusus tampilan
+# =========================================================
+CSS_THEME = """
 <style>
 :root{
   --bg: #f6f8fc;
@@ -216,18 +216,20 @@ section.main [data-baseweb="select"] span{ color: var(--text) !important; }
   .kpi-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>
-""",
-    unsafe_allow_html=True
-)
+"""
+st.markdown(CSS_THEME, unsafe_allow_html=True)
 
-# =========================
-# CONSTANTS
-# =========================
-URUTAN_BULAN = [
+
+# =========================================================
+# 3) KONSTANTA & FUNGSI BANTU
+# =========================================================
+MONTH_ORDER = [
     "JANUARI","FEBRUARI","MARET","APRIL","MEI","JUNI",
     "JULI","AGUSTUS","SEPTEMBER","OKTOBER","NOVEMBER","DESEMBER"
 ]
-KOLUM_NUMERIK_DB1 = [
+
+# Kolom detail stok pada DB1 (dipakai untuk hitung agregat SUNTIK/PIL/IMPLAN)
+DB1_NUMERIC_COLUMNS = [
     "SUNTIKAN 1 BULANAN",
     "SUNTIKAN 3 BULANAN KOMBINASI",
     "SUNTIKAN 3 BULANAN PROGESTIN",
@@ -238,90 +240,145 @@ KOLUM_NUMERIK_DB1 = [
     "IMPLAN 2 BATANG",
     "IUD"
 ]
-VAR_STOK = ["SUNTIK", "PIL", "IMPLAN", "KONDOM", "IUD"]
-VAR_ALL_STOK = ["TOTAL_STOK"] + VAR_STOK
 
-def norm_str(x):
+# Kolom stok agregat yang dipakai di dashboard
+STOCK_METHODS = ["SUNTIK", "PIL", "IMPLAN", "KONDOM", "IUD"]
+STOCK_METHODS_WITH_TOTAL = ["TOTAL_STOK"] + STOCK_METHODS
+
+
+def normalize_text(x) -> str:
+    """Rapikan teks: hapus spasi depan/belakang + ubah jadi HURUF BESAR."""
     return str(x).strip().upper()
 
-# =========================
-# LOAD DB1
-# =========================
-@st.cache_data(ttl=300)
-def load_db1_time_series(path_or_file) -> pd.DataFrame:
-    xls = pd.ExcelFile(path_or_file)
-    all_data = []
-    for sheet in xls.sheet_names:
-        df = pd.read_excel(path_or_file, sheet_name=sheet)
-        df["BULAN"] = norm_str(sheet)
-        all_data.append(df)
 
-    df_all = pd.concat(all_data, ignore_index=True)
+def spearman_strength_label(rho: float) -> str:
+    """Label kekuatan korelasi Spearman (berdasar nilai absolut rho)."""
+    a = abs(rho)
+    if a < 0.2: return "sangat lemah"
+    if a < 0.4: return "lemah"
+    if a < 0.6: return "sedang"
+    if a < 0.8: return "kuat"
+    return "sangat kuat"
 
-    miss = [c for c in KOLUM_NUMERIK_DB1 if c not in df_all.columns]
-    if miss:
-        raise ValueError(f"DB1: kolom numerik tidak ditemukan: {miss}")
 
-    df_all[KOLUM_NUMERIK_DB1] = df_all[KOLUM_NUMERIK_DB1].apply(pd.to_numeric, errors="coerce").fillna(0)
-
-    df_all["SUNTIK"] = (
-        df_all["SUNTIKAN 1 BULANAN"]
-        + df_all["SUNTIKAN 3 BULANAN KOMBINASI"]
-        + df_all["SUNTIKAN 3 BULANAN PROGESTIN"]
-    )
-    df_all["PIL"] = df_all["PIL KOMBINASI"] + df_all["PIL PROGESTIN"]
-    df_all["IMPLAN"] = df_all["IMPLAN 1 BATANG"] + df_all["IMPLAN 2 BATANG"]
-
-    df_all["BULAN"] = pd.Categorical(
-        df_all["BULAN"].apply(norm_str),
-        categories=URUTAN_BULAN,
-        ordered=True
-    )
-
-    if "KABUPATEN" not in df_all.columns:
-        raise ValueError("DB1: kolom 'KABUPATEN' tidak ditemukan (dibutuhkan untuk keterkaitan).")
-
-    df_all["KABUPATEN"] = df_all["KABUPATEN"].astype(str).str.strip().str.upper()
-    return df_all
-
-def db1_ts_per_kab(df_all: pd.DataFrame, kabupaten: str) -> pd.DataFrame:
-    df_k = df_all[df_all["KABUPATEN"] == kabupaten][["BULAN"] + VAR_STOK].copy()
-    return df_k.groupby("BULAN", as_index=False).sum().sort_values("BULAN")
-
-def db1_agg_per_kab(df_all: pd.DataFrame) -> pd.DataFrame:
-    out = df_all[["KABUPATEN"] + VAR_STOK].groupby("KABUPATEN", as_index=False).sum()
-    out["TOTAL_STOK"] = out[VAR_STOK].sum(axis=1)
-    return out
-
-def adf_status(series: pd.Series):
+def adf_test_result(series: pd.Series):
+    """
+    Uji stasioneritas ADF untuk deret waktu.
+    Mengembalikan (p_value, kesimpulan).
+    """
     if not HAS_STATSMODELS:
         return np.nan, "statsmodels belum terpasang"
+
     s = series.dropna().astype(float)
     if len(s) < 6:
         return np.nan, "data terlalu sedikit"
-    p = adfuller(s)[1]
-    return p, ("stasioner" if p < 0.05 else "tidak stasioner (perlu differencing)")
 
-# =========================
-# LOAD DB2
-# =========================
+    p_value = adfuller(s)[1]
+    conclusion = "stasioner" if p_value < 0.05 else "tidak stasioner (perlu differencing)"
+    return p_value, conclusion
+
+
+# =========================================================
+# 4) MEMBACA & MENYIAPKAN DB1 (STOK)
+# =========================================================
 @st.cache_data(ttl=300)
-def load_db2_people(path_or_file) -> pd.DataFrame:
-    df = pd.read_excel(path_or_file)
+def load_db1_stock_timeseries(excel_path_or_file) -> pd.DataFrame:
+    """
+    DB1 dibaca dari Excel multi-sheet.
+    Nama sheet dianggap sebagai BULAN.
+    """
+    xls = pd.ExcelFile(excel_path_or_file)
+
+    monthly_frames = []
+    for sheet_name in xls.sheet_names:
+        df_sheet = pd.read_excel(excel_path_or_file, sheet_name=sheet_name)
+        df_sheet["BULAN"] = normalize_text(sheet_name)
+        monthly_frames.append(df_sheet)
+
+    stock_raw = pd.concat(monthly_frames, ignore_index=True)
+
+    # Validasi kolom numerik wajib ada
+    missing_cols = [c for c in DB1_NUMERIC_COLUMNS if c not in stock_raw.columns]
+    if missing_cols:
+        raise ValueError(f"DB1: kolom numerik tidak ditemukan: {missing_cols}")
+
+    # Pastikan kolom stok berupa angka
+    stock_raw[DB1_NUMERIC_COLUMNS] = (
+        stock_raw[DB1_NUMERIC_COLUMNS]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0)
+    )
+
+    # Buat agregat metode
+    stock_raw["SUNTIK"] = (
+        stock_raw["SUNTIKAN 1 BULANAN"]
+        + stock_raw["SUNTIKAN 3 BULANAN KOMBINASI"]
+        + stock_raw["SUNTIKAN 3 BULANAN PROGESTIN"]
+    )
+    stock_raw["PIL"] = stock_raw["PIL KOMBINASI"] + stock_raw["PIL PROGESTIN"]
+    stock_raw["IMPLAN"] = stock_raw["IMPLAN 1 BATANG"] + stock_raw["IMPLAN 2 BATANG"]
+
+    # Urutan bulan (supaya grafik deret waktu rapi)
+    stock_raw["BULAN"] = pd.Categorical(
+        stock_raw["BULAN"].apply(normalize_text),
+        categories=MONTH_ORDER,
+        ordered=True
+    )
+
+    # Pastikan ada kolom kabupaten untuk proses join
+    if "KABUPATEN" not in stock_raw.columns:
+        raise ValueError("DB1: kolom 'KABUPATEN' tidak ditemukan (dibutuhkan untuk keterkaitan).")
+
+    stock_raw["KABUPATEN"] = stock_raw["KABUPATEN"].astype(str).str.strip().str.upper()
+    return stock_raw
+
+
+def get_stock_timeseries_for_kabupaten(stock_all: pd.DataFrame, kabupaten: str) -> pd.DataFrame:
+    """Ambil stok per bulan untuk 1 kabupaten."""
+    df = stock_all[stock_all["KABUPATEN"] == kabupaten][["BULAN"] + STOCK_METHODS].copy()
+    return df.groupby("BULAN", as_index=False).sum().sort_values("BULAN")
+
+
+def aggregate_stock_by_kabupaten(stock_all: pd.DataFrame) -> pd.DataFrame:
+    """Agregasi stok setahun per kabupaten (menjumlahkan semua bulan)."""
+    out = stock_all[["KABUPATEN"] + STOCK_METHODS].groupby("KABUPATEN", as_index=False).sum()
+    out["TOTAL_STOK"] = out[STOCK_METHODS].sum(axis=1)
+    return out
+
+
+# =========================================================
+# 5) MEMBACA & MENYIAPKAN DB2 (SDM + ADMIN)
+# =========================================================
+@st.cache_data(ttl=300)
+def load_db2_people(excel_path_or_file) -> pd.DataFrame:
+    """
+    DB2 berisi jumlah tempat KB dan SDM per kabupaten.
+    Menghasilkan kolom tambahan:
+    - tenaga_kesehatan_total
+    - sdm_per_tempat
+    - admin_per_tempat
+    """
+    df = pd.read_excel(excel_path_or_file)
+
+    # Samakan nama kolom agar gampang dipakai
     df.columns = [
-        "kode","kabupaten","tempat_kb","dok_kandungan","dok_urologi",
-        "dok_umum","bidan","perawat","administrasi"
+        "kode", "kabupaten", "tempat_kb",
+        "dok_kandungan", "dok_urologi", "dok_umum",
+        "bidan", "perawat", "administrasi"
     ]
 
+    # Buang baris yang kabupatennya kosong / header / bukan teks kabupaten
     df = df[df["kabupaten"].notna()]
     df["kabupaten"] = df["kabupaten"].astype(str).str.strip()
     df = df[df["kabupaten"].str.upper() != "KABUPATEN"]
     df = df[df["kabupaten"].str.isalpha()]
     df = df.reset_index(drop=True)
 
-    num_cols = df.columns[2:]
-    df[num_cols] = df[num_cols].apply(lambda x: pd.to_numeric(x, errors="coerce"))
+    # Ubah semua kolom angka jadi numeric
+    numeric_cols = df.columns[2:]
+    df[numeric_cols] = df[numeric_cols].apply(lambda x: pd.to_numeric(x, errors="coerce"))
 
+    # Total tenaga kesehatan = dokter + bidan + perawat
     df["tenaga_kesehatan_total"] = (
         df["dok_kandungan"].fillna(0)
         + df["dok_urologi"].fillna(0)
@@ -330,115 +387,133 @@ def load_db2_people(path_or_file) -> pd.DataFrame:
         + df["perawat"].fillna(0)
     )
 
+    # Hindari pembagian nol (tempat_kb = 0)
     df["tempat_kb_safe"] = df["tempat_kb"].replace({0: np.nan})
     df["sdm_per_tempat"] = (df["tenaga_kesehatan_total"] / df["tempat_kb_safe"]).round(3)
     df["admin_per_tempat"] = (df["administrasi"] / df["tempat_kb_safe"]).round(3)
 
-    int_cols = ["tempat_kb","dok_kandungan","dok_urologi","dok_umum","bidan","perawat","administrasi","tenaga_kesehatan_total"]
+    # Format kolom integer (rapi)
+    int_cols = [
+        "tempat_kb", "dok_kandungan", "dok_urologi", "dok_umum",
+        "bidan", "perawat", "administrasi", "tenaga_kesehatan_total"
+    ]
     df[int_cols] = df[int_cols].round(0).astype("Int64")
 
+    # Siapkan kunci join
     df["KABUPATEN"] = df["kabupaten"].str.upper()
     return df
 
-def spearman_strength(rho: float) -> str:
-    a = abs(rho)
-    if a < 0.2: return "sangat lemah"
-    if a < 0.4: return "lemah"
-    if a < 0.6: return "sedang"
-    if a < 0.8: return "kuat"
-    return "sangat kuat"
 
-# =========================
-# LOAD FROM REPO
-# =========================
+# =========================================================
+# 6) LOAD FILE DARI FOLDER REPO (data/)
+# =========================================================
 DB1_PATH = os.path.join("data", "DATA KETERSEDIAAN ALAT DAN OBAT KONTRASEPSI.xlsx")
 DB2_PATH = os.path.join("data", "Jumlah tempat pelayanan kb yang memiliki tenaga kesehatan dan administrasi.xlsx")
 
 if not os.path.exists(DB1_PATH):
     st.error(f"File DB1 tidak ditemukan: {DB1_PATH}")
     st.stop()
+
 if not os.path.exists(DB2_PATH):
     st.error(f"File DB2 tidak ditemukan: {DB2_PATH}")
     st.stop()
 
-df1_all = load_db1_time_series(DB1_PATH)
-df2 = load_db2_people(DB2_PATH)
-df1_kab = db1_agg_per_kab(df1_all)
-df_int = df2.merge(df1_kab, on="KABUPATEN", how="inner")
+# Baca data
+stock_all_months_df = load_db1_stock_timeseries(DB1_PATH)
+people_df = load_db2_people(DB2_PATH)
 
-kab_list = sorted(df_int["KABUPATEN"].unique().tolist())
-if not kab_list:
+# Agregasi stok tahunan per kabupaten
+stock_yearly_by_kab_df = aggregate_stock_by_kabupaten(stock_all_months_df)
+
+# Gabungkan (join) DB1 + DB2 berdasarkan kabupaten yang sama
+integrated_df = people_df.merge(stock_yearly_by_kab_df, on="KABUPATEN", how="inner")
+
+kabupaten_list = sorted(integrated_df["KABUPATEN"].unique().tolist())
+if not kabupaten_list:
     st.error("Tidak ada kabupaten yang terhubung. Pastikan penulisan kabupaten DB1 & DB2 sama.")
     st.stop()
 
-# =========================
-# SIDEBAR MENU (ICON + TEXT)
-# =========================
-MENU = [
-    ("SUMMARY", "📊  Dashboard"),
-    ("TS", "📈  Deret Waktu"),
-    ("PEOPLE", "👥  People Analytics"),
-    ("LINK", "🔗  Keterkaitan"),
-    ("KRUSKAL", "🧪  Kruskal–Wallis"),
-    ("DATASET", "🗂️  Dataset")
+
+# =========================================================
+# 7) SIDEBAR MENU
+# =========================================================
+MENU_ITEMS = [
+    ("SUMMARY",  "📊  Dashboard"),
+    ("TS",       "📈  Deret Waktu"),
+    ("PEOPLE",   "👥  People Analytics"),
+    ("LINK",     "🔗  Keterkaitan"),
+    ("KRUSKAL",  "🧪  Kruskal–Wallis"),
+    ("DATASET",  "🗂️  Dataset"),
 ]
-MENU_KEY_TO_NAME = {k: v for k, v in MENU}
+MENU_LABEL = {key: label for key, label in MENU_ITEMS}
 
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>KB Analytics</div>", unsafe_allow_html=True)
     st.markdown("<div class='sidebar-sub'>Stok × SDM × Administrasi</div>", unsafe_allow_html=True)
 
-    menu_key = st.radio(
+    active_menu = st.radio(
         "Menu",
-        [k for k, _ in MENU],
-        format_func=lambda k: MENU_KEY_TO_NAME[k],
+        [k for k, _ in MENU_ITEMS],
+        format_func=lambda k: MENU_LABEL[k],
         label_visibility="collapsed"
     )
 
-    st.markdown("<div class='sidebar-foot'>Data dibaca dari folder <b>data/</b> di repo.</div>", unsafe_allow_html=True)
-
-# =========================
-# TOPBAR + FILTER KABUPATEN (KANAN ATAS)
-# =========================
-top_l, top_r = st.columns([2.4, 1.2], vertical_alignment="center")
-with top_l:
     st.markdown(
-        f"<div class='topbar'><b>Dashboard KB Terintegrasi</b>"
-        f"<span class='crumb'>{MENU_KEY_TO_NAME[menu_key].replace('📊  ','').replace('📈  ','').replace('👥  ','').replace('🔗  ','').replace('🧪  ','').replace('🗂️  ','')}</span></div>",
+        "<div class='sidebar-foot'>Data dibaca dari folder <b>data/</b> di repo.</div>",
         unsafe_allow_html=True
     )
-with top_r:
-    kab = st.selectbox("Kabupaten", kab_list, index=0)
 
-# =========================
-# COLORFUL KPI CARDS
-# =========================
-kab_count = df_int["KABUPATEN"].nunique()
-tot_tempat = int(df_int["tempat_kb"].fillna(0).sum())
-tot_sdm = int(df_int["tenaga_kesehatan_total"].fillna(0).sum())
-tot_stok = float(df_int["TOTAL_STOK"].fillna(0).sum())
+
+# =========================================================
+# 8) TOPBAR + FILTER KABUPATEN
+# =========================================================
+top_left, top_right = st.columns([2.4, 1.2], vertical_alignment="center")
+
+with top_left:
+    crumb = MENU_LABEL[active_menu]
+    # hilangkan emoji di crumb agar lebih clean
+    for emoji in ["📊", "📈", "👥", "🔗", "🧪", "🗂️"]:
+        crumb = crumb.replace(emoji, "").strip()
+
+    st.markdown(
+        f"<div class='topbar'><b>Dashboard KB Terintegrasi</b>"
+        f"<span class='crumb'>{crumb}</span></div>",
+        unsafe_allow_html=True
+    )
+
+with top_right:
+    selected_kabupaten = st.selectbox("Kabupaten", kabupaten_list, index=0)
+
+
+# =========================================================
+# 9) KPI UTAMA (RINGKASAN ANGKA)
+# =========================================================
+jumlah_kabupaten_terhubung = integrated_df["KABUPATEN"].nunique()
+total_tempat_kb = int(integrated_df["tempat_kb"].fillna(0).sum())
+total_tenaga_kesehatan = int(integrated_df["tenaga_kesehatan_total"].fillna(0).sum())
+total_stok_setahun = float(integrated_df["TOTAL_STOK"].fillna(0).sum())
 
 st.markdown(
     f"""
 <div class="kpi-grid">
   <div class="kpi blue">
     <div class="label">Kabupaten Terhubung</div>
-    <div class="value">{kab_count:,}</div>
+    <div class="value">{jumlah_kabupaten_terhubung:,}</div>
     <div class="delta">hasil join DB1 & DB2</div>
   </div>
   <div class="kpi green">
     <div class="label">Total Tempat KB</div>
-    <div class="value">{tot_tempat:,}</div>
+    <div class="value">{total_tempat_kb:,}</div>
     <div class="delta">akumulasi seluruh kabupaten</div>
   </div>
   <div class="kpi purple">
     <div class="label">Total Tenaga Kesehatan</div>
-    <div class="value">{tot_sdm:,}</div>
+    <div class="value">{total_tenaga_kesehatan:,}</div>
     <div class="delta">dokter + bidan + perawat</div>
   </div>
   <div class="kpi orange">
     <div class="label">Total Stok (Setahun)</div>
-    <div class="value">{tot_stok:,.0f}</div>
+    <div class="value">{total_stok_setahun:,.0f}</div>
     <div class="delta">Suntik+Pil+Implan+Kondom+IUD</div>
   </div>
 </div>
@@ -446,126 +521,155 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# =========================
-# CONTENT
-# =========================
-if menu_key == "SUMMARY":
+
+# =========================================================
+# 10) ISI HALAMAN (BERDASARKAN MENU)
+# =========================================================
+if active_menu == "SUMMARY":
     left, right = st.columns(2, gap="large")
 
     with left:
         st.markdown("<div class='card'><b>Top 10 — Tenaga Kesehatan Total</b></div>", unsafe_allow_html=True)
-        top10_sdm = df_int.sort_values("tenaga_kesehatan_total", ascending=False).head(10)
-        st.dataframe(top10_sdm[["KABUPATEN","tempat_kb","tenaga_kesehatan_total","administrasi"]], use_container_width=True, height=360)
+        top10_sdm = integrated_df.sort_values("tenaga_kesehatan_total", ascending=False).head(10)
+        st.dataframe(
+            top10_sdm[["KABUPATEN", "tempat_kb", "tenaga_kesehatan_total", "administrasi"]],
+            use_container_width=True,
+            height=360
+        )
 
         st.markdown("<div class='chart-card'><b>Grafik Top 10 — Tenaga Kesehatan</b></div>", unsafe_allow_html=True)
         st.bar_chart(top10_sdm.set_index("KABUPATEN")[["tenaga_kesehatan_total"]], use_container_width=True)
 
     with right:
         st.markdown("<div class='card'><b>Top 10 — Total Stok Setahun</b></div>", unsafe_allow_html=True)
-        top10_stok = df_int.sort_values("TOTAL_STOK", ascending=False).head(10)
-        st.dataframe(top10_stok[["KABUPATEN","TOTAL_STOK","SUNTIK","PIL","IMPLAN","KONDOM","IUD"]], use_container_width=True, height=360)
+        top10_stok = integrated_df.sort_values("TOTAL_STOK", ascending=False).head(10)
+        st.dataframe(
+            top10_stok[["KABUPATEN", "TOTAL_STOK", "SUNTIK", "PIL", "IMPLAN", "KONDOM", "IUD"]],
+            use_container_width=True,
+            height=360
+        )
 
         st.markdown("<div class='chart-card'><b>Grafik Top 10 — Total Stok</b></div>", unsafe_allow_html=True)
         st.bar_chart(top10_stok.set_index("KABUPATEN")[["TOTAL_STOK"]], use_container_width=True)
 
-elif menu_key == "TS":
+
+elif active_menu == "TS":
     st.markdown(
         f"<div class='card'><b>Deret Waktu Persediaan</b><br/>"
-        f"<span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>",
+        f"<span style='color:rgba(15,23,42,0.62)'>{selected_kabupaten}</span></div>",
         unsafe_allow_html=True
     )
 
-    df_ts = db1_ts_per_kab(df1_all, kab)
+    ts_df = get_stock_timeseries_for_kabupaten(stock_all_months_df, selected_kabupaten)
 
-    vsel = st.multiselect("Variabel stok", VAR_STOK, default=VAR_STOK)
-    if vsel:
+    selected_stock_vars = st.multiselect("Variabel stok", STOCK_METHODS, default=STOCK_METHODS)
+
+    if selected_stock_vars:
         st.markdown("<div class='chart-card'><b>Grafik Deret Waktu</b></div>", unsafe_allow_html=True)
-        st.line_chart(df_ts.set_index("BULAN")[vsel], use_container_width=True)
+        st.line_chart(ts_df.set_index("BULAN")[selected_stock_vars], use_container_width=True)
     else:
         st.info("Pilih minimal 1 variabel.")
 
+    # Moving Average (3 bulan)
     st.markdown("<div class='chart-card'><b>Moving Average (3 bulan)</b></div>", unsafe_allow_html=True)
-    ma_df = df_ts.copy()
-    for v in VAR_STOK:
+    ma_df = ts_df.copy()
+    for v in STOCK_METHODS:
         ma_df[f"MA3_{v}"] = ma_df[v].rolling(3).mean()
-    show_ma = [f"MA3_{v}" for v in vsel] if vsel else [f"MA3_{v}" for v in VAR_STOK]
-    st.line_chart(ma_df.set_index("BULAN")[show_ma], use_container_width=True)
 
+    show_ma_cols = [f"MA3_{v}" for v in selected_stock_vars] if selected_stock_vars else [f"MA3_{v}" for v in STOCK_METHODS]
+    st.line_chart(ma_df.set_index("BULAN")[show_ma_cols], use_container_width=True)
+
+    # ADF
     st.markdown("<div class='card'><b>Uji stasioneritas (ADF)</b></div>", unsafe_allow_html=True)
     rows = []
-    for v in VAR_STOK:
-        p, status = adf_status(df_ts[v])
-        rows.append({"Variabel": v, "p-value": p, "Kesimpulan": status})
+    for v in STOCK_METHODS:
+        p_value, conclusion = adf_test_result(ts_df[v])
+        rows.append({"Variabel": v, "p-value": p_value, "Kesimpulan": conclusion})
     st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
-elif menu_key == "PEOPLE":
+
+elif active_menu == "PEOPLE":
     st.markdown(
         f"<div class='card'><b>People Analytics</b><br/>"
-        f"<span style='color:rgba(15,23,42,0.62)'>{kab}</span></div>",
+        f"<span style='color:rgba(15,23,42,0.62)'>{selected_kabupaten}</span></div>",
         unsafe_allow_html=True
     )
 
-    row = df_int[df_int["KABUPATEN"] == kab].iloc[0]
+    selected_row = integrated_df[integrated_df["KABUPATEN"] == selected_kabupaten].iloc[0]
 
-    p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Tempat KB", f"{int(row['tempat_kb']) if pd.notna(row['tempat_kb']) else 0:,}")
-    p2.metric("Tenaga Kesehatan Total", f"{int(row['tenaga_kesehatan_total']) if pd.notna(row['tenaga_kesehatan_total']) else 0:,}")
-    p3.metric("Administrasi", f"{int(row['administrasi']) if pd.notna(row['administrasi']) else 0:,}")
-    p4.metric("Total Stok Setahun", f"{float(row['TOTAL_STOK']):,.0f}")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Tempat KB", f"{int(selected_row['tempat_kb']) if pd.notna(selected_row['tempat_kb']) else 0:,}")
+    c2.metric("Tenaga Kesehatan Total", f"{int(selected_row['tenaga_kesehatan_total']) if pd.notna(selected_row['tenaga_kesehatan_total']) else 0:,}")
+    c3.metric("Administrasi", f"{int(selected_row['administrasi']) if pd.notna(selected_row['administrasi']) else 0:,}")
+    c4.metric("Total Stok Setahun", f"{float(selected_row['TOTAL_STOK']):,.0f}")
 
-    comp = pd.DataFrame({"Metode": VAR_STOK, "Total Setahun": [float(row[v]) for v in VAR_STOK]})
+    composition_df = pd.DataFrame({
+        "Metode": STOCK_METHODS,
+        "Total Setahun": [float(selected_row[v]) for v in STOCK_METHODS]
+    })
+
     st.markdown("<div class='card'><b>Komposisi stok setahun</b></div>", unsafe_allow_html=True)
-    st.dataframe(comp, use_container_width=True)
+    st.dataframe(composition_df, use_container_width=True)
 
     st.markdown("<div class='chart-card'><b>Grafik komposisi stok</b></div>", unsafe_allow_html=True)
-    st.bar_chart(comp.set_index("Metode"), use_container_width=True)
+    st.bar_chart(composition_df.set_index("Metode"), use_container_width=True)
 
     st.markdown("<div class='card'><b>Deskriptif variabel kunci</b></div>", unsafe_allow_html=True)
     st.dataframe(
-        df_int[["tempat_kb","tenaga_kesehatan_total","administrasi","sdm_per_tempat","admin_per_tempat","TOTAL_STOK"]].describe(),
+        integrated_df[["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat", "TOTAL_STOK"]].describe(),
         use_container_width=True
     )
 
-elif menu_key == "LINK":
-    st.markdown("<div class='card'><b>Analisis Keterkaitan</b><br/><span style='color:rgba(15,23,42,0.62)'>Spearman + Scatter</span></div>", unsafe_allow_html=True)
 
-    x_opts = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
-    y_opts = VAR_ALL_STOK
+elif active_menu == "LINK":
+    st.markdown(
+        "<div class='card'><b>Analisis Keterkaitan</b><br/>"
+        "<span style='color:rgba(15,23,42,0.62)'>Spearman + Scatter</span></div>",
+        unsafe_allow_html=True
+    )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        x_var = st.selectbox("Variabel People (X)", x_opts, index=1)
-    with c2:
-        y_var = st.selectbox("Variabel Stok (Y)", y_opts, index=0)
+    people_x_options = ["tempat_kb", "tenaga_kesehatan_total", "administrasi", "sdm_per_tempat", "admin_per_tempat"]
+    stock_y_options = STOCK_METHODS_WITH_TOTAL
 
-    d = df_int[[x_var, y_var, "KABUPATEN", "administrasi"]].dropna()
-    if len(d) < 5:
+    col1, col2 = st.columns(2)
+    with col1:
+        x_var = st.selectbox("Variabel People (X)", people_x_options, index=1)
+    with col2:
+        y_var = st.selectbox("Variabel Stok (Y)", stock_y_options, index=0)
+
+    valid_df = integrated_df[[x_var, y_var, "KABUPATEN", "administrasi"]].dropna()
+
+    if len(valid_df) < 5:
         st.warning("Data valid terlalu sedikit untuk analisis korelasi.")
     else:
-        rho, p = spearmanr(d[x_var], d[y_var], nan_policy="omit")
+        rho, p_value = spearmanr(valid_df[x_var], valid_df[y_var], nan_policy="omit")
         a, b, c = st.columns(3)
         a.metric("Spearman rho", f"{rho:.3f}")
-        b.metric("p-value", f"{p:.4f}")
-        c.metric("Kekuatan", spearman_strength(rho))
+        b.metric("p-value", f"{p_value:.4f}")
+        c.metric("Kekuatan", spearman_strength_label(rho))
+
         st.markdown("<div class='chart-card'><b>Scatter</b></div>", unsafe_allow_html=True)
-        st.scatter_chart(d.set_index("KABUPATEN")[[x_var, y_var]], use_container_width=True)
+        st.scatter_chart(valid_df.set_index("KABUPATEN")[[x_var, y_var]], use_container_width=True)
 
+    # Mann–Whitney: bandingkan stok ketika admin ada vs tidak
     st.markdown("<div class='card'><b>Uji beda (Mann–Whitney): Admin ada vs tidak</b></div>", unsafe_allow_html=True)
-    d2 = df_int[[y_var, "administrasi"]].dropna()
-    g_admin = d2[d2["administrasi"].astype(float) > 0][y_var].astype(float)
-    g_no = d2[d2["administrasi"].astype(float) == 0][y_var].astype(float)
 
-    if len(g_admin) == 0 or len(g_no) == 0:
+    mw_df = integrated_df[[y_var, "administrasi"]].dropna()
+    group_admin_exists = mw_df[mw_df["administrasi"].astype(float) > 0][y_var].astype(float)
+    group_admin_none = mw_df[mw_df["administrasi"].astype(float) == 0][y_var].astype(float)
+
+    if len(group_admin_exists) == 0 or len(group_admin_none) == 0:
         st.warning("Tidak cukup data untuk membagi grup admin > 0 vs admin = 0.")
     else:
-        u, p_mw = mannwhitneyu(g_admin, g_no, alternative="two-sided")
+        u_stat, p_mw = mannwhitneyu(group_admin_exists, group_admin_none, alternative="two-sided")
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("U", f"{u:.3f}")
+        m1.metric("U", f"{u_stat:.3f}")
         m2.metric("p-value", f"{p_mw:.4f}")
-        m3.metric("Median (Admin ada)", f"{float(np.median(g_admin)):.3f}")
-        m4.metric("Median (Admin tidak)", f"{float(np.median(g_no)):.3f}")
+        m3.metric("Median (Admin ada)", f"{float(np.median(group_admin_exists)):.3f}")
+        m4.metric("Median (Admin tidak)", f"{float(np.median(group_admin_none)):.3f}")
 
-elif menu_key == "KRUSKAL":
+
+elif active_menu == "KRUSKAL":
     st.markdown(
         "<div class='card'><b>Uji Kruskal–Wallis</b><br/>"
         "<span style='color:rgba(15,23,42,0.62)'>DB2 (Rasio) & DB1 (Stok) berdasar kategori (Rendah/Sedang/Tinggi)</span></div>",
@@ -579,16 +683,16 @@ elif menu_key == "KRUSKAL":
         index=0
     )
 
-    # kategori 3 level
+    # Buat kategori 3 level (Rendah/Sedang/Tinggi)
     try:
-        df_int["_kategori_base"] = pd.qcut(
-            df_int[group_base].astype(float),
+        integrated_df["_kategori_base"] = pd.qcut(
+            integrated_df[group_base].astype(float),
             q=3,
             labels=["Rendah", "Sedang", "Tinggi"]
         )
     except Exception:
-        df_int["_kategori_base"] = pd.cut(
-            df_int[group_base].astype(float),
+        integrated_df["_kategori_base"] = pd.cut(
+            integrated_df[group_base].astype(float),
             bins=3,
             labels=["Rendah", "Sedang", "Tinggi"]
         )
@@ -599,7 +703,7 @@ elif menu_key == "KRUSKAL":
         st.markdown("<div class='card'><b>DB2 — Rasio per Fasilitas</b></div>", unsafe_allow_html=True)
         y_people = st.selectbox("Variabel people", ["sdm_per_tempat", "admin_per_tempat"], index=0)
 
-        d = df_int[[y_people, "_kategori_base"]].dropna()
+        d = integrated_df[[y_people, "_kategori_base"]].dropna()
         labels = ["Rendah", "Sedang", "Tinggi"]
         groups = [d[d["_kategori_base"] == lab][y_people].astype(float).dropna().values for lab in labels]
 
@@ -619,15 +723,18 @@ elif menu_key == "KRUSKAL":
                 st.info("Tidak ada perbedaan signifikan antar kategori (α=5%).")
 
             med = d.groupby("_kategori_base")[y_people].median().reindex(labels)
-            st.dataframe(med.reset_index().rename(columns={"_kategori_base":"Kategori", y_people:"Median"}), use_container_width=True)
+            st.dataframe(
+                med.reset_index().rename(columns={"_kategori_base": "Kategori", y_people: "Median"}),
+                use_container_width=True
+            )
             st.markdown("<div class='chart-card'><b>Grafik median</b></div>", unsafe_allow_html=True)
             st.bar_chart(med, use_container_width=True)
 
     with tab2:
         st.markdown("<div class='card'><b>DB1 — Stok Kontrasepsi</b></div>", unsafe_allow_html=True)
-        y_stok = st.selectbox("Variabel stok", ["TOTAL_STOK","SUNTIK","PIL","IMPLAN","KONDOM","IUD"], index=0)
+        y_stok = st.selectbox("Variabel stok", ["TOTAL_STOK", "SUNTIK", "PIL", "IMPLAN", "KONDOM", "IUD"], index=0)
 
-        d = df_int[[y_stok, "_kategori_base"]].dropna()
+        d = integrated_df[[y_stok, "_kategori_base"]].dropna()
         labels = ["Rendah", "Sedang", "Tinggi"]
         groups = [d[d["_kategori_base"] == lab][y_stok].astype(float).dropna().values for lab in labels]
 
@@ -647,20 +754,26 @@ elif menu_key == "KRUSKAL":
                 st.info("Tidak ada perbedaan signifikan stok antar kategori (α=5%).")
 
             med = d.groupby("_kategori_base")[y_stok].median().reindex(labels)
-            st.dataframe(med.reset_index().rename(columns={"_kategori_base":"Kategori", y_stok:"Median"}), use_container_width=True)
+            st.dataframe(
+                med.reset_index().rename(columns={"_kategori_base": "Kategori", y_stok: "Median"}),
+                use_container_width=True
+            )
             st.markdown("<div class='chart-card'><b>Grafik median stok</b></div>", unsafe_allow_html=True)
             st.bar_chart(med, use_container_width=True)
 
-    if "_kategori_base" in df_int.columns:
-        df_int.drop(columns=["_kategori_base"], inplace=True)
+    # Bersihkan kolom sementara
+    if "_kategori_base" in integrated_df.columns:
+        integrated_df.drop(columns=["_kategori_base"], inplace=True)
 
-elif menu_key == "DATASET":
+
+elif active_menu == "DATASET":
     st.markdown("<div class='card'><b>Dataset Terintegrasi (hasil join)</b></div>", unsafe_allow_html=True)
-    st.dataframe(df_int, use_container_width=True, height=520)
+
+    st.dataframe(integrated_df, use_container_width=True, height=520)
 
     st.download_button(
         "⬇️ Download dataset terintegrasi (CSV)",
-        data=df_int.to_csv(index=False).encode("utf-8"),
+        data=integrated_df.to_csv(index=False).encode("utf-8"),
         file_name="dataset_terintegrasi_kb.csv",
         mime="text/csv"
     )
